@@ -1,0 +1,28 @@
+/* index.css */
+
+/* 🚀 CRITICAL: THESE THREE LINES MUST BE AT THE TOP 🚀 */
+@import "tailwindcss";
+
+/* OPTIONAL: You can put your custom font-family setting here, 
+   but it's better to use the font utility class in your <body> tag in index.html or App.tsx 
+*/
+
+/* Example: Setting the global font with Tailwind's 'Inter' font defined in your config */
+@layer base {
+  body {
+    @apply font-sans; 
+  }
+}
+
+/* OPTIONAL: If you want to keep the styles for elements that don't have 
+   Tailwind classes (like the raw <h1> and <p> inside your Header component), 
+   you can use the @apply directive:
+*/
+@layer components {
+  .header-left h1 {
+    @apply text-2xl font-semibold text-gray-800 m-0;
+  }
+  .header-left p {
+    @apply text-sm text-gray-600 mt-1 m-0;
+  }
+}
