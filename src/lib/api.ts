@@ -22,14 +22,14 @@ axios.defaults.headers.common['Accept'] = 'application/json';
 axios.interceptors.request.use(
   (config) => {
     const accessToken = localStorage.getItem('accessToken');
-    console.debug("[DEBUG][REQUEST] URL:", config.url);
-    console.debug("[DEBUG][REQUEST] Method:", config.method);
-    console.debug("[DEBUG][REQUEST] Headers before auth:", config.headers);
-    console.debug("[DEBUG][TOKENS] AccessToken:", accessToken);
+    // console.debug("[DEBUG][REQUEST] URL:", config.url);
+    // console.debug("[DEBUG][REQUEST] Method:", config.method);
+    // console.debug("[DEBUG][REQUEST] Headers before auth:", config.headers);
+    // console.debug("[DEBUG][TOKENS] AccessToken:", accessToken);
     if (accessToken) {
       config.headers['Authorization'] = `Bearer ${accessToken}`;
     }
-    console.debug("[DEBUG][REQUEST] Headers after auth:", config.headers);
+    // console.debug("[DEBUG][REQUEST] Headers after auth:", config.headers);
     return config;
   },
   (error) => {
@@ -38,57 +38,51 @@ axios.interceptors.request.use(
   }
 );
 
-// Response interceptor for debug & token refresh
 axios.interceptors.response.use(
-  (response) => {
-    console.debug("[DEBUG][RESPONSE] URL:", response.config.url);
-    console.debug("[DEBUG][RESPONSE] Status:", response.status);
-    console.debug("[DEBUG][RESPONSE] Data:", response.data);
-    return response;
-  },
+  (response) => response,
   async (error) => {
     const originalRequest = error.config;
-    const accessToken = localStorage.getItem('accessToken');
-    const refreshToken = localStorage.getItem('refreshToken');
 
-    console.error("[DEBUG][RESPONSE ERROR] URL:", originalRequest?.url);
-    console.error("[DEBUG][RESPONSE ERROR] Status:", error.response?.status);
-    console.error("[DEBUG][TOKENS] AccessToken:", accessToken);
-    console.error("[DEBUG][TOKENS] RefreshToken:", refreshToken);
-    console.error("[DEBUG][ERROR DATA]:", error.response?.data || error);
-
+    // If unauthorized & not retried yet
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
-      if (refreshToken) {
-        console.debug("[DEBUG] Attempting token refresh...");
-        try {
-          const res = await axios.get(`${BASE_URL}/refresh`, {
-            headers: { Authorization: `Bearer ${refreshToken}` }
-          });
 
-          const newAccessToken = res.data.accessToken;
-          localStorage.setItem('accessToken', newAccessToken);
-          originalRequest.headers['Authorization'] = `Bearer ${newAccessToken}`;
-          console.debug("[DEBUG] Refresh successful. Retrying original request...");
-          return axios(originalRequest);
-        } catch (refreshError: unknown) {
-          // Type narrowing
-          if (axios.isAxiosError(refreshError)) {
-            console.error("[DEBUG] Refresh token failed (AxiosError):", refreshError.response?.data || refreshError.message);
-          } else if (refreshError instanceof Error) {
-            console.error("[DEBUG] Refresh token failed (Error):", refreshError.message);
-          } else {
-            console.error("[DEBUG] Refresh token failed (Unknown):", refreshError);
-          }
+      const refreshToken = localStorage.getItem("refreshToken");
+      if (!refreshToken) {
+        // No refresh token, just logout
+        localStorage.removeItem("accessToken");
+        localStorage.removeItem("refreshToken");
+        window.location.reload();
+        return Promise.reject(error);
+      }
 
-          localStorage.removeItem('accessToken');
-          localStorage.removeItem('refreshToken');
-          window.location.reload(); // Or redirect to login
-        }
+      try {
+        // Call refresh API with a *fresh axios instance* (no interceptors!)
+        const refreshAxios = axios.create({
+          baseURL: BASE_URL,
+          headers: { "Content-Type": "application/json" },
+        });
 
+        const refreshRes = await refreshAxios.get(`${BASE_URL}/refresh`, {
+          headers: { Authorization: `Bearer ${refreshToken}` },
+        });
+
+        const newAccessToken = refreshRes.data.accessToken;
+        localStorage.setItem("accessToken", newAccessToken);
+
+        // Update header and retry original request once
+        originalRequest.headers["Authorization"] = `Bearer ${newAccessToken}`;
+        return axios(originalRequest);
+      } catch (refreshError) {
+        // Refresh failed → logout (no infinite loop!)
+        localStorage.removeItem("accessToken");
+        localStorage.removeItem("refreshToken");
+        window.location.reload();
+        return Promise.reject(refreshError);
       }
     }
 
+    // Any other error
     return Promise.reject(error);
   }
 );
@@ -141,10 +135,10 @@ let mockPayroll: PayrollRecord[] = [];
 export const api = {
   // ========== AUTHENTICATION ==========
   async login(email: string, password: string) {
-    console.debug("[API] login called:", email); // DEBUG
+    // console.debug("[API] login called:", email); // DEBUG
     try {
       const res = await axios.post(`${BASE_URL}/login`, { email, password });
-      console.debug("[API] login response:", res.data); // DEBUG
+      // console.debug("[API] login response:", res.data); // DEBUG
       const { accessToken, refreshToken } = res.data;
       localStorage.setItem('accessToken', accessToken);
       localStorage.setItem('refreshToken', refreshToken);
@@ -155,15 +149,15 @@ export const api = {
     }
   },
   logout() {
-    console.debug("[API] logout called"); // DEBUG
+    // console.debug("[API] logout called"); // DEBUG
     localStorage.removeItem('accessToken');
     localStorage.removeItem('refreshToken');
   },
   async changePassword(email: string, oldPassword: string, newPassword: string) {
-    console.debug("[API] changePassword called:", email); // DEBUG
+    // console.debug("[API] changePassword called:", email); // DEBUG
     try {
       const res = await axios.post(`${BASE_URL}/password/reset`, { email, oldPassword, newPassword });
-      console.debug("[API] changePassword response:", res.data); // DEBUG
+      // console.debug("[API] changePassword response:", res.data); // DEBUG
       return res.data;
     } catch (err) {
       console.error("[API] changePassword error:", err); // DEBUG
@@ -171,12 +165,12 @@ export const api = {
     }
   },
   async refreshToken(refreshToken: string) {
-    console.debug("[API] refreshToken called"); // DEBUG
+    // console.debug("[API] refreshToken called"); // DEBUG
     try {
       const res = await axios.get(`${BASE_URL}/refresh`, {
         headers: { Authorization: `Bearer ${refreshToken}` }
       });
-      console.debug("[API] refreshToken response:", res.data); // DEBUG
+      // console.debug("[API] refreshToken response:", res.data); // DEBUG
       return res.data;
     } catch (err) {
       console.error("[API] refreshToken error:", err); // DEBUG
@@ -187,10 +181,10 @@ export const api = {
 
   // ========== EMPLOYEE MANAGEMENT ==========
   async addEmployee(employee: AddEmployeeRequest): Promise<AddEmployeeResponse> {
-    console.debug("[API] addEmployee called:", employee); // DEBUG
+    // console.debug("[API] addEmployee called:", employee); // DEBUG
     try {
       const res = await axios.post(`${BASE_URL}/emp`, employee);
-      console.debug("[API] addEmployee response:", res.data); // DEBUG
+      // console.debug("[API] addEmployee response:", res.data); // DEBUG
       return res.data;
     } catch (err) {
       console.error("[API] addEmployee error:", err); // DEBUG
@@ -198,10 +192,10 @@ export const api = {
     }
   },
   async getEmployees(): Promise<Employee[]> {
-    console.debug("[API] getEmployees called"); // DEBUG
+    // console.debug("[API] getEmployees called"); // DEBUG
     try {
       const res = await axios.get(`${BASE_URL}/emp`);
-      console.debug("[API] getEmployees response:", res.data); // DEBUG
+      // console.debug("[API] getEmployees response:", res.data); // DEBUG
       return res.data;
     } catch (err) {
       console.error("[API] getEmployees error:", err); // DEBUG
@@ -209,10 +203,10 @@ export const api = {
     }
   },
   async updateEmployee(employeeId: string, data: Partial<Employee>) {
-    console.debug("[API] updateEmployee called:", { employeeId, data }); // DEBUG
+    // console.debug("[API] updateEmployee called:", { employeeId, data }); // DEBUG
     try {
       const res = await axios.put(`${BASE_URL}/emp/${employeeId}`, data);
-      console.debug("[API] updateEmployee response:", res.data); // DEBUG
+      // console.debug("[API] updateEmployee response:", res.data); // DEBUG
       return res.data;
     } catch (err) {
       console.error("[API] updateEmployee error:", err); // DEBUG
@@ -220,10 +214,10 @@ export const api = {
     }
   },
   async deleteEmployee(employeeId: string) {
-    console.debug("[API] deleteEmployee called:", employeeId); // DEBUG
+    // console.debug("[API] deleteEmployee called:", employeeId); // DEBUG
     try {
       const res = await axios.delete(`${BASE_URL}/emp/${employeeId}`);
-      console.debug("[API] deleteEmployee response:", res.data); // DEBUG
+      // console.debug("[API] deleteEmployee response:", res.data); // DEBUG
       return res.data;
     } catch (err) {
       console.error("[API] deleteEmployee error:", err); // DEBUG
@@ -233,10 +227,10 @@ export const api = {
 
   // ========== ATTENDANCE MANAGEMENT ==========
   async getAttendance(date: string): Promise<AttendanceRecord[]> {
-    console.debug("[API] getAttendance called:", date); // DEBUG
+    // console.debug("[API] getAttendance called:", date); // DEBUG
     try {
       const res = await axios.get(`${BASE_URL}/attendance`, { params: { date } });
-      console.debug("[API] getAttendance response:", res.data); // DEBUG
+      // console.debug("[API] getAttendance response:", res.data); // DEBUG
       return res.data;
     } catch (err) {
       console.error("[API] getAttendance error:", err); // DEBUG
@@ -244,10 +238,10 @@ export const api = {
     }
   },
   async markAttendance(data: AttendanceMarkRequest) {
-    console.debug("[API] markAttendance called:", data); // DEBUG
+    // console.debug("[API] markAttendance called:", data); // DEBUG
     try {
       const res = await axios.post(`${BASE_URL}/attendance`, data);
-      console.debug("[API] markAttendance response:", res.data); // DEBUG
+      // console.debug("[API] markAttendance response:", res.data); // DEBUG
       return res.data;
     } catch (err) {
       console.error("[API] markAttendance error:", err); // DEBUG
@@ -257,10 +251,10 @@ export const api = {
 
   // ========== PAYROLL MANAGEMENT ==========
   async getPayrollRecords(): Promise<PayrollRecord[]> {
-    console.debug("[API] getPayrollRecords called"); // DEBUG
+    // console.debug("[API] getPayrollRecords called"); // DEBUG
     try {
       const res = await axios.get(`${BASE_URL}/payroll`);
-      console.debug("[API] getPayrollRecords response:", res.data); // DEBUG
+      // console.debug("[API] getPayrollRecords response:", res.data); // DEBUG
       return res.data;
     } catch (err) {
       console.error("[API] getPayrollRecords error:", err); // DEBUG
@@ -268,10 +262,10 @@ export const api = {
     }
   },
   async generatePayroll(employeeId: string, month: string, year: number) {
-    console.debug("[API] generatePayroll called:", { employeeId, month, year }); // DEBUG
+    // console.debug("[API] generatePayroll called:", { employeeId, month, year }); // DEBUG
     try {
       const res = await axios.post(`${BASE_URL}/payroll/generate`, { employeeId, month, year });
-      console.debug("[API] generatePayroll response:", res.data); // DEBUG
+      // console.debug("[API] generatePayroll response:", res.data); // DEBUG
       return res.data;
     } catch (err) {
       console.error("[API] generatePayroll error:", err); // DEBUG
@@ -279,10 +273,10 @@ export const api = {
     }
   },
   async updatePayrollStatus(payrollId: string, status: PayrollRecord['status']) {
-    console.debug("[API] updatePayrollStatus called:", { payrollId, status }); // DEBUG
+    // console.debug("[API] updatePayrollStatus called:", { payrollId, status }); // DEBUG
     try {
       const res = await axios.patch(`${BASE_URL}/payroll/${payrollId}`, { status });
-      console.debug("[API] updatePayrollStatus response:", res.data); // DEBUG
+      // console.debug("[API] updatePayrollStatus response:", res.data); // DEBUG
       return res.data;
     } catch (err) {
       console.error("[API] updatePayrollStatus error:", err); // DEBUG
@@ -292,10 +286,10 @@ export const api = {
 
   // ========== DASHBOARD STATISTICS ==========
   async getDashboardStats(): Promise<DashboardStats> {
-    console.debug("[API] getDashboardStats called"); // DEBUG
+    // console.debug("[API] getDashboardStats called"); // DEBUG
     try {
       const res = await axios.get(`${BASE_URL}/dashboard/stats`);
-      console.debug("[API] getDashboardStats response:", res.data); // DEBUG
+      // console.debug("[API] getDashboardStats response:", res.data); // DEBUG
       return res.data;
     } catch (err) {
       console.error("[API] getDashboardStats error:", err); // DEBUG
