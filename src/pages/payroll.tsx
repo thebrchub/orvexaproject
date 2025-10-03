@@ -29,7 +29,7 @@ export default function Payroll() {
       setLoading(true);
       const [payrollData, employeesData] = await Promise.all([
         api.getPayrollRecords(),
-        api.getEmployees()
+        api.getaEmployees()
       ]);
       setPayrollRecords(payrollData);
       setEmployees(employeesData);

@@ -1,29 +1,33 @@
 import React, { useState, useEffect } from 'react';
-import { api, formatCurrency, formatDate} from '../lib/api';
+import { api } from '../lib/api';
 import type { AddEmployeeRequest } from '../lib/api';
 import TableColumn, { StatusBadge, ActionButton } from '../components/Table';
 import ModalProps, { ConfirmModal, SuccessModal } from '../components/Modal';
 import EmployeeFormProps from '../components/EmployeeForm';
+import type { AddEmployeeResponse } from '../lib/api';
 
-// Extended Employee type to match your backend structure
+// Utility functions
+const formatCurrency = (amount: number): string =>
+  new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount);
+
+const formatDate = (dateString: string): string =>
+  new Intl.DateTimeFormat('en-IN', { year: 'numeric', month: 'short', day: 'numeric' }).format(new Date(dateString));
+
+// Employee interface
 interface Employee {
   id: string;
   employeeId: string;
   email: string;
   mobile: string;
   name: string;
-  firstName: string;
-  lastName: string;
   fullName: string;
-  doj: string; // Date of Joining
-  dob: string; // Date of Birth
+  doj: string;
+  dob: string;
   salary: number;
   aadhar: string;
   pan: string;
   accountNo: string;
   ifsc: string;
-  
-  // Additional fields that might come from backend or be added later
   position?: string;
   department?: string;
   employmentType?: string;
@@ -35,71 +39,116 @@ interface Employee {
   updatedAt?: string;
 }
 
+// Add this right after your imports
+interface EmployeeResponse {
+  id: string | number;
+  name: string;
+  email: string;
+  mobile: string;
+  doj: string;
+  dob: string;
+  details: {
+    salary: number;
+    aadhar: string;
+    pan: string;
+    accountNo: number;
+    ifsc: string;
+  };
+  position?: string;
+  department?: string;
+  employmentType?: string;
+  workLocation?: string;
+  status?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+
 export default function Employees() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDepartment, setSelectedDepartment] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('');
-  
-  // Modal states
+
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
   const [isErrorModalOpen, setIsErrorModalOpen] = useState(false);
-  
-  // Selected employee for edit/delete/view
+
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
   const [successMessage, setSuccessMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [formLoading, setFormLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
-  useEffect(() => {
-    loadEmployees();
-  }, []);
+  useEffect(() => { loadEmployees(); }, []);
 
-  const loadEmployees = async () => {
-    try {
-      setLoading(true);
-      // TODO: Once you have the GET employees endpoint, uncomment this:
-      // const data = await api.getEmployees();
-      
-      // For now, using mock data - replace this once API is ready
-      const mockData: Employee[] = [];
-      setEmployees(mockData);
-    } catch (error: any) {
-      console.error('Failed to load employees:', error);
-      setErrorMessage(error?.response?.data?.message || 'Failed to load employees');
-      setIsErrorModalOpen(true);
-    } finally {
-      setLoading(false);
-    }
+    const loadEmployees = async () => {
+      try {
+        setLoading(true);
+
+        // Fetch all employees
+        const data = await api.getAllEmployees();
+
+        // Map API response to frontend Employee type
+       const mappedEmployees: Employee[] = data.map((emp: EmployeeResponse) => {
+  const details = emp.details || { salary: 0, aadhar: '', pan: '', accountNo: 0, ifsc: '' };
+
+  return {
+    id: emp.id.toString(),
+    employeeId: emp.id.toString(),
+    name: emp.name || 'N/A',
+    fullName: emp.name || 'N/A',
+    email: emp.email || 'N/A',
+    mobile: emp.mobile || 'N/A',
+    doj: emp.doj || '',
+    dob: emp.dob || '',
+    salary: details.salary || 0,
+    aadhar: details.aadhar || '',
+    pan: details.pan || '',
+    accountNo: details.accountNo?.toString() || '',
+    ifsc: details.ifsc || '',
+    status: emp.status || 'active',
+    position: emp.position || 'N/A',
+    department: emp.department || 'N/A',
+    workLocation: emp.workLocation || 'N/A',
   };
+});
 
-  // Filter employees based on search, department, and status
-  const filteredEmployees = employees.filter(employee => {
-    const matchesSearch = 
-      employee.fullName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      employee.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      employee.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      employee.mobile?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      employee.employeeId?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      employee.position?.toLowerCase().includes(searchTerm.toLowerCase());
-    
-    const matchesDepartment = !selectedDepartment || employee.department === selectedDepartment;
-    const matchesStatus = !selectedStatus || employee.status === selectedStatus;
-    
-    return matchesSearch && matchesDepartment && matchesStatus;
+
+
+        setEmployees(mappedEmployees);
+      } catch (error: any) {
+        console.error('Failed to load employees:', error);
+        setErrorMessage(error?.response?.data?.message || error.message || 'Failed to load employees');
+        setIsErrorModalOpen(true);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+
+  // Filters
+  const filteredEmployees = employees.filter(emp => {
+    const matchesSearch =
+      emp.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      emp.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      emp.mobile.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      emp.employeeId.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (emp.position?.toLowerCase().includes(searchTerm.toLowerCase()) ?? false);
+
+    const matchesDept = !selectedDepartment || emp.department === selectedDepartment;
+    const matchesStatus = !selectedStatus || emp.status === selectedStatus;
+
+    return matchesSearch && matchesDept && matchesStatus;
   });
 
-  // Get unique departments and statuses for filters
   const departments = [...new Set(employees.map(emp => emp.department).filter(Boolean))];
   const statuses = [...new Set(employees.map(emp => emp.status).filter(Boolean))];
 
-  // Calculate comprehensive statistics
   const stats = {
     total: employees.length,
     active: employees.filter(emp => emp.status === 'active').length,
@@ -108,46 +157,39 @@ export default function Employees() {
     remoteWorkers: employees.filter(emp => emp.workLocation === 'remote').length,
   };
 
-  // Handle employee creation
   const handleCreateEmployee = async (formData: any) => {
     try {
       setFormLoading(true);
+      console.log('🔍 Form Data Received:', JSON.stringify(formData, null, 2));
       
-      // Map form data to API request format
-      const employeeData: AddEmployeeRequest = {
-        email: formData.email,
-        mobile: formData.phone || formData.mobile,
-        id: Date.now(), // Generate temporary ID - backend should handle this
-        name: formData.fullName || `${formData.firstName} ${formData.lastName}`,
-        doj: formData.joinDate || formData.doj,
-        dob: formData.dateOfBirth || formData.dob,
-        details: {
-          salary: parseFloat(formData.salary) || 0,
-          aadhar: formData.aadharNumber || formData.aadhar || '',
-          pan: formData.panNumber || formData.pan || '',
-          accountNo: parseInt(formData.bankAccount?.accountNumber || formData.accountNo) || 0,
-          ifsc: formData.bankAccount?.ifscCode || formData.ifsc || '',
-        },
-      };
-      
-      const response = await api.addEmployee(employeeData);
-      
-      if (response.success) {
-        // Reload employees list
-        await loadEmployees();
-        
-        setIsAddModalOpen(false);
-        setSuccessMessage(response.message || `Employee ${employeeData.name} added successfully!`);
-        setIsSuccessModalOpen(true);
-      } else {
-        throw new Error(response.message || 'Failed to add employee');
+      // Validate that we have required data
+      if (!formData.email || !formData.name) {
+        throw new Error('Email and name are required');
       }
+
+      // The EmployeeForm already sends data in the correct API format
+      // Just add the ID and use it directly
+      const employeeData: AddEmployeeRequest = {
+        ...formData,
+        id: Date.now(),
+      };
+
+      console.log('📦 Prepared Employee Data:', JSON.stringify(employeeData, null, 2));
+
+      // API call
+      const responseFromApi = await api.addEmployee(employeeData);
+
+      // Reload employee list
+      await loadEmployees();
+
+      setIsAddModalOpen(false);
+      setSuccessMessage(`Employee ${employeeData.name} added successfully!`);
+      setIsSuccessModalOpen(true);
+
     } catch (error: any) {
       console.error('Failed to create employee:', error);
       setErrorMessage(
-        error?.response?.data?.message || 
-        error?.message || 
-        'Failed to add employee. Please try again.'
+        error?.response?.data?.message || error?.message || 'Failed to add employee. Please try again.'
       );
       setIsErrorModalOpen(true);
     } finally {
@@ -155,90 +197,31 @@ export default function Employees() {
     }
   };
 
-  // Handle employee update
+
   const handleUpdateEmployee = async (formData: any) => {
-    if (!selectedEmployee) return;
-    
-    try {
-      setFormLoading(true);
-      
-      // TODO: Once you have the UPDATE employee endpoint, uncomment and adapt this:
-      // const employeeData = {
-      //   email: formData.email,
-      //   mobile: formData.phone || formData.mobile,
-      //   name: formData.fullName || `${formData.firstName} ${formData.lastName}`,
-      //   doj: formData.joinDate || formData.doj,
-      //   dob: formData.dateOfBirth || formData.dob,
-      //   details: {
-      //     salary: parseFloat(formData.salary) || 0,
-      //     aadhar: formData.aadharNumber || formData.aadhar || '',
-      //     pan: formData.panNumber || formData.pan || '',
-      //     accountNo: parseInt(formData.bankAccount?.accountNumber || formData.accountNo) || 0,
-      //     ifsc: formData.bankAccount?.ifscCode || formData.ifsc || '',
-      //   },
-      // };
-      // await api.updateEmployee(selectedEmployee.id, employeeData);
-      
-      // For now, show a message that this feature is pending
-      setErrorMessage('Update employee API is not yet implemented. Coming soon!');
-      setIsErrorModalOpen(true);
-      setIsEditModalOpen(false);
-      setSelectedEmployee(null);
-    } catch (error: any) {
-      console.error('Failed to update employee:', error);
-      setErrorMessage(
-        error?.response?.data?.message || 
-        error?.message || 
-        'Failed to update employee. Please try again.'
-      );
-      setIsErrorModalOpen(true);
-    } finally {
-      setFormLoading(false);
-    }
+    setErrorMessage('Update employee API is not yet implemented.');
+    setIsErrorModalOpen(true);
   };
 
-  // Handle employee deletion
   const handleDeleteEmployee = async () => {
-    if (!selectedEmployee) return;
-    
-    try {
-      setDeleteLoading(true);
-      
-      // TODO: Once you have the DELETE employee endpoint, uncomment this:
-      // await api.deleteEmployee(selectedEmployee.id);
-      
-      // For now, show a message that this feature is pending
-      setErrorMessage('Delete employee API is not yet implemented. Coming soon!');
-      setIsErrorModalOpen(true);
-      setIsDeleteModalOpen(false);
-      setSelectedEmployee(null);
-    } catch (error: any) {
-      console.error('Failed to delete employee:', error);
-      setErrorMessage(
-        error?.response?.data?.message || 
-        error?.message || 
-        'Failed to delete employee. Please try again.'
-      );
-      setIsErrorModalOpen(true);
-    } finally {
-      setDeleteLoading(false);
-    }
+    setErrorMessage('Delete employee API is not yet implemented.');
+    setIsErrorModalOpen(true);
   };
 
-  // Table columns configuration
+  // Table columns
   const columns = [
     {
       key: 'employeeId',
       label: 'Employee',
       width: '20%',
-      render: (value: string, row: Employee) => (
+      render: (_: string, row: Employee) => (
         <div className="flex items-center">
           <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center text-white font-bold mr-3">
-            {row.name?.charAt(0).toUpperCase() || row.firstName?.charAt(0).toUpperCase() || 'E'}
+            {row.name?.charAt(0).toUpperCase() || 'E'}
           </div>
           <div>
-            <div className="font-medium text-gray-900">{row.name || row.fullName}</div>
-            <div className="text-sm text-gray-500">{value || row.id}</div>
+            <div className="font-medium text-gray-900">{row.name}</div>
+            <div className="text-sm text-gray-500">{row.employeeId}</div>
             <div className="text-xs text-gray-400">{row.email}</div>
           </div>
         </div>
@@ -248,9 +231,9 @@ export default function Employees() {
       key: 'mobile',
       label: 'Contact',
       width: '15%',
-      render: (value: string, row: Employee) => (
+      render: (_: string, row: Employee) => (
         <div>
-          <div className="text-sm text-gray-900">{value || row.phone}</div>
+          <div className="text-sm text-gray-900">{row.mobile || row.phone}</div>
           <div className="text-xs text-gray-500">{row.position || 'N/A'}</div>
         </div>
       ),
@@ -259,45 +242,27 @@ export default function Employees() {
       key: 'department',
       label: 'Department',
       width: '12%',
-      render: (value: string, row: Employee) => (
-        <div>
-          {value ? (
-            <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
-              {value}
-            </span>
-          ) : (
-            <span className="text-sm text-gray-400">Not set</span>
-          )}
-        </div>
-      ),
+      render: (value: string) =>
+        value ? <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">{value}</span> :
+          <span className="text-sm text-gray-400">Not set</span>,
     },
     {
       key: 'salary',
       label: 'Salary',
       width: '12%',
-      render: (value: number) => (
-        <div>
-          <span className="font-medium text-gray-900">
-            {value ? formatCurrency(value) : 'N/A'}
-          </span>
-        </div>
-      ),
+      render: (value: number) => <span className="font-medium text-gray-900">{value ? formatCurrency(value) : 'N/A'}</span>,
     },
     {
       key: 'doj',
       label: 'Join Date',
       width: '12%',
-      render: (value: string) => (
-        <div className="text-sm">{value ? formatDate(value) : 'N/A'}</div>
-      ),
+      render: (value: string) => <div className="text-sm">{value ? formatDate(value) : 'N/A'}</div>,
     },
     {
       key: 'status',
       label: 'Status',
       width: '10%',
-      render: (value: string) => (
-        <StatusBadge status={value || 'active'} />
-      ),
+      render: (value: string | undefined) => <StatusBadge status={value ?? 'active'} />,
     },
     {
       key: 'actions',
@@ -305,36 +270,9 @@ export default function Employees() {
       width: '19%',
       render: (_: any, row: Employee) => (
         <div className="flex space-x-1">
-          <ActionButton
-            icon="👁️"
-            label="View"
-            onClick={() => {
-              setSelectedEmployee(row);
-              setIsViewModalOpen(true);
-            }}
-            variant="secondary"
-            size="sm"
-          />
-          <ActionButton
-            icon="✏️"
-            label="Edit"
-            onClick={() => {
-              setSelectedEmployee(row);
-              setIsEditModalOpen(true);
-            }}
-            variant="secondary"
-            size="sm"
-          />
-          <ActionButton
-            icon="🗑️"
-            label="Delete"
-            onClick={() => {
-              setSelectedEmployee(row);
-              setIsDeleteModalOpen(true);
-            }}
-            variant="danger"
-            size="sm"
-          />
+          <ActionButton icon="👁️" label="View" onClick={() => { setSelectedEmployee(row); setIsViewModalOpen(true); }} variant="secondary" size="sm" />
+          <ActionButton icon="✏️" label="Edit" onClick={() => { setSelectedEmployee(row); setIsEditModalOpen(true); }} variant="secondary" size="sm" />
+          <ActionButton icon="🗑️" label="Delete" onClick={() => { setSelectedEmployee(row); setIsDeleteModalOpen(true); }} variant="danger" size="sm" />
         </div>
       ),
     },
@@ -454,8 +392,8 @@ export default function Employees() {
                 onChange={(e) => setSelectedStatus(e.target.value)}
                 className="input-field min-w-32"
               >
-                {/* <option value="">All Status</option>
-                {statuses.map(status => (
+                <option value="">All Status</option>
+                {/* {statuses.map(status => (
                   <option key={status} value={status}>
                     {status.charAt(0).toUpperCase() + status.slice(1)}
                   </option>
