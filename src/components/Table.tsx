@@ -5,7 +5,7 @@ interface TableColumn {
   label: string;
   sortable?: boolean;
   width?: string;
-  render?: (value: any, row: any) => React.ReactNode;
+  render?: (value: any, row: any, index?: number) => React.ReactNode;
 }
 
 interface TableProps {
@@ -87,7 +87,7 @@ export default function Table({
               >
                 {columns.map((column) => (
                   <td key={column.key} className="px-6 py-4 whitespace-nowrap">
-                    {column.render ? column.render(row[column.key], row) : (
+                    {column.render ? column.render(row[column.key], row, index) : (
                       <div className="text-sm text-gray-900">{row[column.key]}</div>
                     )}
                   </td>
@@ -101,7 +101,6 @@ export default function Table({
   );
 }
 
-// Status Badge Component - useful for tables
 // Status Badge Component - useful for tables
 export function StatusBadge({ status, type = 'default' }: { status?: string; type?: 'default' | 'attendance' | 'payroll' }) {
   const displayStatus = status?.toLowerCase() ?? 'active'; // default fallback
@@ -117,6 +116,14 @@ export function StatusBadge({ status, type = 'default' }: { status?: string; typ
           return 'bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full text-sm font-medium';
         case 'half-day':
           return 'bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-sm font-medium';
+        case 'not-marked':
+          return 'bg-gray-100 text-gray-800 px-2 py-1 rounded-full text-sm font-medium';
+        case 'checked-in':
+          return 'bg-green-100 text-green-800 px-2 py-1 rounded-full text-sm font-medium';
+        case 'check-in-requested':
+          return 'bg-orange-100 text-orange-800 px-2 py-1 rounded-full text-sm font-medium animate-pulse';
+        case 'check-out-requested':
+          return 'bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-sm font-medium animate-pulse';
         default:
           return 'bg-gray-100 text-gray-800 px-2 py-1 rounded-full text-sm font-medium';
       }
@@ -146,13 +153,32 @@ export function StatusBadge({ status, type = 'default' }: { status?: string; typ
     }
   };
 
+  const getStatusLabel = () => {
+    switch (displayStatus) {
+      case 'check-in-requested':
+        return 'Check-In Pending';
+      case 'check-out-requested':
+        return 'Check-Out Pending';
+      case 'checked-in':
+        return 'Checked In';
+      case 'not-marked':
+        return 'Not Marked';
+      case 'half-day':
+        return 'Half Day';
+      default:
+        return displayStatus.charAt(0).toUpperCase() + displayStatus.slice(1);
+    }
+  };
+
   return (
     <span className={getStatusStyles()}>
-      {displayStatus.charAt(0).toUpperCase() + displayStatus.slice(1)}
+      {displayStatus === 'check-in-requested' && '⏳ '}
+      {displayStatus === 'check-out-requested' && '⏳ '}
+      {displayStatus === 'checked-in' && '✓ '}
+      {getStatusLabel()}
     </span>
   );
 }
-
 
 // Action Button Component - useful for table actions
 export function ActionButton({ 

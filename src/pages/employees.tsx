@@ -5,13 +5,9 @@ import TableColumn, { StatusBadge, ActionButton } from '../components/Table';
 import ModalProps, { ConfirmModal, SuccessModal } from '../components/Modal';
 import EmployeeFormProps from '../components/EmployeeForm';
 import type { AddEmployeeResponse } from '../lib/api';
+// Import utility functions
+import { formatDate, formatCurrency } from '../utils/timeUtils';
 
-// Utility functions
-const formatCurrency = (amount: number): string =>
-  new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount);
-
-const formatDate = (dateString: string): string =>
-  new Intl.DateTimeFormat('en-IN', { year: 'numeric', month: 'short', day: 'numeric' }).format(new Date(dateString));
 
 // Employee interface
 interface Employee {
@@ -157,6 +153,22 @@ export default function Employees() {
     remoteWorkers: employees.filter(emp => emp.workLocation === 'remote').length,
   };
 
+    const [sortOption, setSortOption] = useState("name");
+
+    const sortedEmployees = [...filteredEmployees].sort((a, b) => {
+      switch (sortOption) {
+        case "name":
+          return a.name.localeCompare(b.name);
+        case "salary":
+          return (b.salary || 0) - (a.salary || 0);
+        case "doj":
+          return new Date(b.doj).getTime() - new Date(a.doj).getTime();
+        default:
+          return 0;
+      }
+    });
+
+
   const handleCreateEmployee = async (formData: any) => {
     try {
       setFormLoading(true);
@@ -210,6 +222,14 @@ export default function Employees() {
 
   // Table columns
   const columns = [
+    {
+      key: "serial",
+      label: "S.No",
+      width: "6%",
+      render: (_: any, __: Employee, index?: number) => (
+        <div className="text-sm font-medium text-gray-700">{(index ?? 0) + 1}</div>
+      ),
+    },
     {
       key: 'employeeId',
       label: 'Employee',
@@ -421,12 +441,23 @@ export default function Employees() {
         </div>
       </div>
 
+      <select
+        value={sortOption}
+        onChange={(e) => setSortOption(e.target.value)}
+        className="input-field min-w-36"
+      >
+        <option value="name">Sort by Name (A–Z)</option>
+        <option value="salary">Sort by Salary (High → Low)</option>
+        <option value="doj">Sort by Joining Date (Newest → Oldest)</option>
+      </select>
+
+
       {/* Employees Table */}
       <TableColumn
         columns={columns}
-        data={filteredEmployees}
+        data={sortedEmployees}
         loading={loading}
-        emptyMessage="No employees found. Add your first employee to get started!"
+        emptyMessage="No employees found."
       />
 
       {/* View Employee Modal */}

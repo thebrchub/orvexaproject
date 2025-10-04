@@ -31,7 +31,6 @@ axios.defaults.headers.common["Content-Type"] = "application/json";
 axios.defaults.headers.common["Accept"] = "application/json";
 
 // Request interceptor - Add auth token
-// Request interceptor
 axios.interceptors.request.use(
   (config) => {
     const accessToken = localStorage.getItem("accessToken");
@@ -66,8 +65,13 @@ axios.interceptors.response.use(
       }
 
       try {
-        // Call refresh endpoint with refresh token
-        const refreshRes = await axios.get(`${BASE_URL}/refresh`, {
+        // Call refresh endpoint with refresh token using POST
+        const refreshAxios = axios.create({
+          baseURL: BASE_URL,
+          headers: { "Content-Type": "application/json" },
+        });
+
+        const refreshRes = await refreshAxios.post(`${BASE_URL}/refresh`, {}, {
           headers: { Authorization: `Bearer ${refreshToken}` },
         });
 
@@ -115,7 +119,7 @@ export interface AttendanceResponse {
   };
   checkIn: string | null; // HH:MM:SS.nnnnnnnnn
   checkOut: string | null; // HH:MM:SS.nnnnnnnnn
-  attendanceStatus: "NOT_MARKED" | "PRESENT" | "ABSENT" | "LATE" | "HALF_DAY" | string;
+  attendanceStatus: "NOT_MARKED" | "PRESENT" | "ABSENT" | "LATE" | "HALF_DAY" | "CHECKED_IN" | "CHECK_IN_APPROVAL_REQUESTED" | "CHECK_OUT_APPROVAL_REQUESTED" | string;
   otHours: number;
 }
 
@@ -199,7 +203,7 @@ export interface AttendanceRecord {
   checkIn: string | null;
   checkOut: string | null;
   workingHours: number;
-  status: 'present' | 'absent' | 'late' | 'half-day' | 'not-marked';
+  status: 'present' | 'absent' | 'late' | 'half-day' | 'not-marked' | 'checked-in' | 'check-in-requested' | 'check-out-requested';
   notes?: string;
 }
 
@@ -245,6 +249,70 @@ export interface DashboardStats {
   pendingPayrolls: number;
 }
 
+// ============= HELPER FUNCTIONS =============
+/**
+ * Map backend attendance status to frontend format
+ */
+function mapAttendanceStatus(backendStatus: string): AttendanceRecord['status'] {
+  const statusMap: Record<string, AttendanceRecord['status']> = {
+    'NOT_MARKED': 'not-marked',
+    'PRESENT': 'present',
+    'ABSENT': 'absent',
+    'LATE': 'late',
+    'HALF_DAY': 'half-day',
+    'CHECKED_IN': 'checked-in',
+    'CHECK_IN_APPROVAL_REQUESTED': 'check-in-requested',
+    'CHECK_OUT_APPROVAL_REQUESTED': 'check-out-requested',
+  };
+  return statusMap[backendStatus] || 'not-marked';
+}
+
+/**
+ * Calculate working hours from checkIn and checkOut times
+ */
+function calculateWorkingHours(checkIn: string | null, checkOut: string | null): number {
+  if (!checkIn || !checkOut) return 0;
+  
+  try {
+    // Parse time strings (format: HH:MM:SS.nnnnnnnnn)
+    const [inHours, inMinutes] = checkIn.split(':').map(Number);
+    const [outHours, outMinutes] = checkOut.split(':').map(Number);
+    
+    const inTotalMinutes = inHours * 60 + inMinutes;
+    const outTotalMinutes = outHours * 60 + outMinutes;
+    
+    const diffMinutes = outTotalMinutes - inTotalMinutes;
+    return diffMinutes / 60; // Convert to hours
+  } catch (err) {
+    console.error('Error calculating working hours:', err);
+    return 0;
+  }
+}
+
+/**
+ * Map backend EmployeeResponse to frontend Employee format
+ */
+function mapEmployeeResponse(emp: EmployeeResponse): Employee {
+  return {
+    id: emp.email, // Using email as ID since backend uses email as identifier
+    employeeId: emp.email,
+    email: emp.email,
+    mobile: emp.mobile,
+    name: emp.name,
+    fullName: emp.name,
+    doj: emp.doj,
+    dob: emp.dob,
+    salary: emp.details.salary,
+    aadhar: emp.details.aadhar,
+    pan: emp.details.pan,
+    accountNo: emp.details.accountNo,
+    ifsc: emp.details.ifsc,
+    position: '',
+    department: '',
+    status: 'active',
+  };
+}
+
 // ============= API FUNCTIONS =============
 export const api = {
   // ========== AUTHENTICATION ==========
@@ -282,7 +350,7 @@ export const api = {
 
   async refreshToken(refreshToken: string) {
     try {
-      const res = await axios.get(`${BASE_URL}/refresh`, {
+      const res = await axios.post(`${BASE_URL}/refresh`, {}, {
         headers: { Authorization: `Bearer ${refreshToken}` },
       });
       return res.data;
@@ -303,70 +371,105 @@ export const api = {
   },
 
   // ========== ATTENDANCE ==========
-  // ========== ATTENDANCE ==========
-/**
- * Get all attendance records (for HR dashboard)
- */
-async getAllAttendance(): Promise<AttendanceResponse[]> {
-  try {
-    const res = await axios.get(`${BASE_URL}/attendence`);
-    return res.data;
-  } catch (err) {
-    throw new Error(parseApiError(err));
-  }
-},
+  /**
+   * Get all attendance records (for HR dashboard)
+   */
+  async getAllAttendance(): Promise<AttendanceResponse[]> {
+    try {
+      const res = await axios.get(`${BASE_URL}/attendence`);
+      return res.data;
+    } catch (err) {
+      throw new Error(parseApiError(err));
+    }
+  },
 
-/**
- * Get attendance for a specific employee
- * @param employeeEmail - Employee's email address (used as ID)
- */
-async getEmployeeAttendance(employeeEmail: string): Promise<AttendanceResponse> {
-  try {
-    const res = await axios.get(`${BASE_URL}/attendence/${employeeEmail}`);
-    return res.data;
-  } catch (err) {
-    throw new Error(parseApiError(err));
-  }
-},
+  /**
+   * Get attendance for a specific employee
+   * @param employeeEmail - Employee's email address (used as ID)
+   */
+  async getEmployeeAttendance(employeeEmail: string): Promise<AttendanceResponse> {
+    try {
+      const res = await axios.get(`${BASE_URL}/attendence/${employeeEmail}`);
+      return res.data;
+    } catch (err) {
+      throw new Error(parseApiError(err));
+    }
+  },
 
-/**
- * Approve attendance for a specific employee
- * @param employeeEmail - Employee's email address (used as ID)
- */
-async approveAttendance(employeeEmail: string): Promise<AttendanceResponse> {
-  try {
-    const res = await axios.get(`${BASE_URL}/attendence/approve/${employeeEmail}`);
-    return res.data;
-  } catch (err) {
-    throw new Error(parseApiError(err));
-  }
-},
+  /**
+   * Approve attendance for a specific employee
+   * @param employeeEmail - Employee's email address (used as ID)
+   */
+  async approveAttendance(employeeEmail: string): Promise<AttendanceResponse> {
+    try {
+      console.log(`[API] Approving attendance for: ${employeeEmail}`);
+      console.log(`[API] URL: ${BASE_URL}/attendence/approve/${employeeEmail}`);
+      
+      const res = await axios.post(`${BASE_URL}/attendence/approve/${employeeEmail}`);
+      
+      console.log(`[API] Approve response:`, res.data);
+      return res.data;
+    } catch (err: any) {
+      console.error(`[API] Approve attendance error:`, err.response?.data || err.message);
+      throw new Error(parseApiError(err));
+    }
+  },
 
-/**
- * Legacy: Map backend format to frontend-friendly AttendanceRecord
- */
-async getAttendance(date: string): Promise<AttendanceRecord[]> {
-  try {
-    const res = await axios.get(`${BASE_URL}/attendence`);
-    return res.data.map((att: AttendanceResponse) => ({
-      id: att.details.employeeEmail + att.details.attendanceDate,
-      employeeId: att.details.employeeEmail,
-      employeeName: att.details.employeeEmail, // no name from backend
-      date: att.details.attendanceDate,
-      checkIn: att.checkIn,
-      checkOut: att.checkOut,
-      workingHours: att.otHours || 0,
-      status: mapAttendanceStatus(att.attendanceStatus),
-      notes: undefined,
-    }));
-  } catch (err) {
-    console.error("[API] getAttendance error:", err);
-    throw err;
-  }
-},
+  /**
+   * Get attendance records for a specific date, mapped to frontend format
+   */
+  async getAttendance(date: string): Promise<AttendanceRecord[]> {
+    try {
+      // Get all attendance records
+      const allAttendance = await this.getAllAttendance();
+      
+      // Get all employees to map names
+      const employees = await this.getAllEmployees();
+      const employeeMap = new Map(employees.map(emp => [emp.email, emp]));
+      
+      // Filter by date and map to frontend format
+      const filteredAttendance = allAttendance
+        .filter(att => att.details.attendanceDate === date)
+        .map(att => {
+          const employee = employeeMap.get(att.details.employeeEmail);
+          const workingHours = att.otHours || calculateWorkingHours(att.checkIn, att.checkOut);
+          
+          return {
+            id: `${att.details.employeeEmail}-${att.details.attendanceDate}`,
+            employeeId: att.details.employeeEmail,
+            employeeName: employee?.name || att.details.employeeEmail,
+            date: att.details.attendanceDate,
+            checkIn: att.checkIn,
+            checkOut: att.checkOut,
+            workingHours: workingHours,
+            status: mapAttendanceStatus(att.attendanceStatus),
+            notes: undefined,
+          };
+        });
+      
+      return filteredAttendance;
+    } catch (err) {
+      console.error("[API] getAttendance error:", err);
+      throw err;
+    }
+  },
+
   // ========== EMPLOYEES ==========
   /**
-   * Get all employees
+   * Get all employees mapped to frontend format
+   */
+  async getEmployees(): Promise<Employee[]> {
+    try {
+      const employees = await this.getAllEmployees();
+      return employees.map(mapEmployeeResponse);
+    } catch (err) {
+      console.error("[API] getEmployees error:", err);
+      throw err;
+    }
+  },
+
+  /**
+   * Get all employees (raw backend format)
    */
   async getAllEmployees(): Promise<EmployeeResponse[]> {
     try {
@@ -378,13 +481,13 @@ async getAttendance(date: string): Promise<AttendanceRecord[]> {
   },
 
   async getEmployee(employeeId: string): Promise<EmployeeResponse> {
-  try {
-    const res = await axios.get(`${BASE_URL}/emp/${employeeId}`);
-    return res.data;
-  } catch (err) {
-    throw new Error(parseApiError(err));
-  }
-},
+    try {
+      const res = await axios.get(`${BASE_URL}/emp/${employeeId}`);
+      return res.data;
+    } catch (err) {
+      throw new Error(parseApiError(err));
+    }
+  },
 
   /**
    * Add new employee
@@ -396,8 +499,8 @@ async getAttendance(date: string): Promise<AttendanceRecord[]> {
 
       // Map request + response to full frontend Employee object
       const newEmployee: Employee = {
-        id: employeeId || "",
-        employeeId: employeeId || "",
+        id: employeeId || employee.email,
+        employeeId: employeeId || employee.email,
         email: employee.email,
         mobile: employee.mobile,
         name: employee.name,
@@ -422,7 +525,6 @@ async getAttendance(date: string): Promise<AttendanceRecord[]> {
       throw err;
     }
   },
-
 
   // TODO: Update and Delete endpoints not yet available
   async updateEmployee(employeeId: string, data: Partial<Employee>) {
@@ -469,7 +571,7 @@ async getAttendance(date: string): Promise<AttendanceRecord[]> {
       return {
         totalEmployees: employees.length,
         presentToday: todayAttendance.filter(
-          (att) => att.attendanceStatus === "PRESENT" || att.attendanceStatus === "LATE"
+          (att) => att.attendanceStatus === "PRESENT" || att.attendanceStatus === "LATE" || att.attendanceStatus === "CHECKED_IN"
         ).length,
         absentToday: todayAttendance.filter((att) => att.attendanceStatus === "ABSENT").length,
         lateToday: todayAttendance.filter((att) => att.attendanceStatus === "LATE").length,
@@ -482,18 +584,3 @@ async getAttendance(date: string): Promise<AttendanceRecord[]> {
     }
   },
 };
-
-// ============= HELPER FUNCTIONS =============
-/**
- * Map backend attendance status to frontend format
- */
-function mapAttendanceStatus(backendStatus: string): AttendanceRecord['status'] {
-  const statusMap: Record<string, AttendanceRecord['status']> = {
-    'NOT_MARKED': 'not-marked',
-    'PRESENT': 'present',
-    'ABSENT': 'absent',
-    'LATE': 'late',
-    'HALF_DAY': 'half-day',
-  };
-  return statusMap[backendStatus] || 'not-marked';
-}

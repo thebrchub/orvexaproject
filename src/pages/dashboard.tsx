@@ -84,15 +84,15 @@ export default function Dashboard() {
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Welcome Header */}
-      <div className="card bg-gradient-to-r from-blue-600 to-purple-600 text-white">
+      <div className=" text-black">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold mb-2">Dashboard Overview</h1>
-            <p className="text-blue-100">
+            <h1 className="text-2xl text-black font-bold mb-2">Dashboard Overview</h1>
+            <p className="text-black-100">
               Welcome back! Here's what's happening with your team today.
             </p>
           </div>
-          <div className="text-6xl opacity-20">📊</div>
+          {/* <div className="text-6xl opacity-20">📊</div> */}
         </div>
       </div>
 

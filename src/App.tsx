@@ -1,36 +1,48 @@
 import React from "react";
-import { BrowserRouter as Router, Routes, Route, Link, useLocation } from "react-router-dom";
+import {
+  BrowserRouter as Router,
+  Routes,
+  Route,
+  Link,
+  useLocation,
+  Navigate,
+  useNavigate,
+} from "react-router-dom";
 import Dashboard from "./pages/dashboard";
 import Employees from "./pages/employees";
 import Attendance from "./pages/attendance";
 import Payroll from "./pages/payroll";
 import Login from "./pages/login";
+import SupportStaff from "./pages/support/SupportCompanyDemoPage"; // ✅ Our new support page
 
+// ✅ Sidebar Component
 function Sidebar() {
   const location = useLocation();
-  
-  const isActive = (path: string) => {
-    return location.pathname === path;
-  };
+  const navigate = useNavigate();
+
+  const isActive = (path: string) => location.pathname === path;
 
   const navItems = [
-    
-    { path: "/", label: "Dashboard", icon: "📊" },
+    { path: "/dashboard", label: "Dashboard", icon: "📊" },
     { path: "/employees", label: "Employees", icon: "👥" },
     { path: "/attendance", label: "Attendance", icon: "📋" },
     { path: "/payroll", label: "Payroll", icon: "💰" },
   ];
 
+  const handleLogout = () => {
+    localStorage.removeItem("accessToken");
+    localStorage.removeItem("refreshToken");
+    navigate("/login", { replace: true });
+  };
+
   return (
-    <aside className="w-64 bg-gray-900 text-white flex flex-col shadow-xl">
-      {/* Logo/Brand */}
-      <div className="p-6 border-b border-gray-700">
+    <aside className="w-64 bg-gray-900 text-white flex flex-col shadow-xl fixed top-0 left-0 h-screen overflow-y-auto">
+      <div className="p-6 border-b border-gray-700 sticky top-0 bg-gray-900 z-10">
         <h2 className="text-2xl font-bold text-blue-400">Orvexa Admin</h2>
         <p className="text-gray-400 text-sm mt-1">Attendance Management</p>
       </div>
 
-      {/* Navigation */}
-      <nav className="flex-1 p-4">
+      <nav className="flex-1 p-4 overflow-y-auto">
         <div className="space-y-2">
           {navItems.map((item) => (
             <Link
@@ -49,9 +61,16 @@ function Sidebar() {
         </div>
       </nav>
 
-      {/* Footer */}
-      <div className="p-4 border-t border-gray-700">
-        <div className="text-xs text-gray-400 text-center">
+      <div className="p-4 border-t border-gray-700 bg-gray-900">
+        <button
+          onClick={handleLogout}
+          className="w-full bg-red-600 hover:bg-red-700 text-white py-2 rounded-lg transition-all duration-200 flex items-center justify-center space-x-2 font-medium"
+        >
+          <span>🚪</span>
+          <span>Logout</span>
+        </button>
+
+        <div className="text-xs text-gray-400 text-center mt-3">
           <p>© 2025 Orvexa Platform</p>
           <p className="mt-1">v1.0.0 MVP</p>
         </div>
@@ -60,14 +79,17 @@ function Sidebar() {
   );
 }
 
+// ✅ Header Component
 function Header() {
   return (
-    <header>
-      <div className="header-left">
-        <h1>Welcome Back!</h1>
-        <p>Manage your team's attendance and payroll</p>
+    <header className="flex justify-between items-center p-4 border-b bg-white shadow-sm">
+      <div>
+        <h1 className="text-xl font-bold text-gray-800">Welcome Back!</h1>
+        <p className="text-gray-500 text-sm">
+          Manage your team's attendance and payroll
+        </p>
       </div>
-      <div className="header-right">
+      <div className="flex items-center space-x-4">
         <div className="bg-green-100 text-green-800 px-4 py-2 rounded-full text-sm font-medium">
           ✅ System Online
         </div>
@@ -79,24 +101,57 @@ function Header() {
   );
 }
 
+// ✅ Protected Route Wrapper
+function PrivateRoute({ children }: { children: React.ReactElement }) {
+  const token = localStorage.getItem("accessToken");
+  return token ? children : <Navigate to="/login" replace />;
+}
+
+// ✅ Layout Wrapper (for admin panel)
+function Layout() {
+  return (
+    <div className="flex bg-gray-50 min-h-screen">
+      <Sidebar />
+      <div className="flex-1 flex flex-col ml-64">
+        <Header />
+        <main className="flex-1 p-6 overflow-y-auto">
+          <Routes>
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/employees" element={<Employees />} />
+            <Route path="/attendance" element={<Attendance />} />
+            <Route path="/payroll" element={<Payroll />} />
+            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          </Routes>
+        </main>
+      </div>
+    </div>
+  );
+}
+
+// ✅ Main App Component
 export default function App() {
   return (
     <Router>
-      <div className="flex min-h-screen bg-gray-50">
-        <Sidebar />
-        <div className="flex-1 flex flex-col">
-          <Header />
-          <main className="flex-1 p-6">
-            <Routes>
-              <Route path="/" element={<Login />} />
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/employees" element={<Employees />} />
-              <Route path="/attendance" element={<Attendance />} />
-              <Route path="/payroll" element={<Payroll />} />
-            </Routes>
-          </main>
-        </div>
-      </div>
+      <Routes>
+        {/* Support Staff Demo Page */}
+        <Route path="/support-staff" element={<SupportStaff />} />
+
+        {/* Public Login route */}
+        <Route path="/login" element={<Login />} />
+
+        {/* Protected Admin routes */}
+        <Route
+          path="/*"
+          element={
+            <PrivateRoute>
+              <Layout />
+            </PrivateRoute>
+          }
+        />
+
+        {/* Catch-all fallback */}
+        <Route path="*" element={<Navigate to="/login" replace />} />
+      </Routes>
     </Router>
   );
 }

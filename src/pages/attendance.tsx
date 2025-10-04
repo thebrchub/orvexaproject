@@ -3,16 +3,8 @@ import { api } from '../lib/api';
 import Table, { StatusBadge, ActionButton } from '../components/Table';
 import Modal, { SuccessModal, ConfirmModal } from '../components/Modal';
 import DatePicker from '../components/DatePicker';
+import { formatDate, formatTime, formatCurrency } from '../utils/timeUtils';
 
-// Utility functions
-const formatTime = (timeString: string): string => {
-  const date = new Date(timeString);
-  return new Intl.DateTimeFormat('en-IN', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: true,
-  }).format(date);
-};
 
 // Types matching backend structure
 interface AttendanceRecord {
@@ -23,8 +15,9 @@ interface AttendanceRecord {
   checkIn: string | null;
   checkOut: string | null;
   workingHours: number;
-  status: 'present' | 'absent' | 'late' | 'half-day';
+  status: 'present' | 'absent' | 'late' | 'half-day' | 'not-marked' | 'checked-in' | 'check-in-requested' | 'check-out-requested';
   notes?: string;
+  rawStatus?: string;
 }
 
 interface Employee {
@@ -39,6 +32,13 @@ interface Employee {
   status?: string;
 }
 
+interface ApprovalRequest {
+  employeeId: string;
+  employeeName: string;
+  type: 'check-in' | 'check-out';
+  time: string;
+}
+
 export default function Attendance() {
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -47,96 +47,153 @@ export default function Attendance() {
     new Date().toISOString().split('T')[0]
   );
   
+  // Auto-refresh state
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
+  
+  // Approval requests state
+  const [approvalRequests, setApprovalRequests] = useState<ApprovalRequest[]>([]);
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
+  
   // Modal states
-  const [isMarkAttendanceOpen, setIsMarkAttendanceOpen] = useState(false);
   const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
   const [isErrorModalOpen, setIsErrorModalOpen] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
-  const [markingLoading, setMarkingLoading] = useState(false);
+  const [approvingLoading, setApprovingLoading] = useState(false);
 
+  // Auto-refresh every 10 seconds
+  useEffect(() => {
+    if (!autoRefresh) return;
+    
+    const interval = setInterval(() => {
+      loadData(true); // Silent refresh
+    }, 10000); // 10 seconds
+    
+    return () => clearInterval(interval);
+  }, [autoRefresh, selectedDate]);
+
+  // Initial load
   useEffect(() => {
     loadData();
   }, [selectedDate]);
 
-  const loadData = async () => {
+  const loadData = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       
-      // TODO: Once you have the GET attendance endpoint, uncomment this:
-      // const attendanceData = await api.getAttendance(selectedDate);
-      // setAttendanceRecords(attendanceData);
+      // Fetch employees and attendance data
+      const [employeesData, attendanceData] = await Promise.all([
+        api.getEmployees(),
+        api.getAttendance(selectedDate)
+      ]);
       
-      // TODO: Once you have the GET employees endpoint, uncomment this:
-      // const employeesData = await api.getEmployees();
-      // setEmployees(employeesData);
+      setEmployees(employeesData);
+      setAttendanceRecords(attendanceData);
+      setLastRefresh(new Date());
       
-      // For now, using empty arrays - replace once API is ready
-      setAttendanceRecords([]);
-      setEmployees([]);
+      // Check for approval requests
+      const requests: ApprovalRequest[] = [];
+      attendanceData.forEach(record => {
+        const employee = employeesData.find(e => e.email === record.employeeId);
+        const employeeName = employee?.name || record.employeeName;
+        
+        if (record.status === 'check-in-requested') {
+          requests.push({
+            employeeId: record.employeeId,
+            employeeName: employeeName,
+            type: 'check-in',
+            time: record.checkIn || 'Unknown time'
+          });
+        } else if (record.status === 'check-out-requested') {
+          requests.push({
+            employeeId: record.employeeId,
+            employeeName: employeeName,
+            type: 'check-out',
+            time: record.checkOut || 'Unknown time'
+          });
+        }
+      });
+      
+      // Show notification if there are new requests
+      if (requests.length > 0 && requests.length > approvalRequests.length) {
+        // Play notification sound (optional)
+        try {
+          const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBTGH0fPTgjMGHm7A7+OZURE');
+          audio.play().catch(() => {}); // Ignore if audio fails
+        } catch (err) {}
+      }
+      
+      setApprovalRequests(requests);
+      
+      // Auto-open modal if there are requests
+      if (requests.length > 0) {
+        setShowApprovalModal(true);
+      }
+      
     } catch (error: any) {
       console.error('Failed to load attendance data:', error);
-      setErrorMessage(error?.response?.data?.message || 'Failed to load attendance data');
-      setIsErrorModalOpen(true);
+      if (!silent) {
+        setErrorMessage(error?.message || 'Failed to load attendance data');
+        setIsErrorModalOpen(true);
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   // Calculate stats
   const stats = {
     totalEmployees: employees.length,
-    present: attendanceRecords.filter(record => record.status === 'present' || record.status === 'late').length,
+    present: attendanceRecords.filter(record => 
+      record.status === 'present' || record.status === 'late' || record.status === 'checked-in'
+    ).length,
     absent: attendanceRecords.filter(record => record.status === 'absent').length,
     late: attendanceRecords.filter(record => record.status === 'late').length,
     onTime: attendanceRecords.filter(record => record.status === 'present').length,
+    pendingApprovals: approvalRequests.length,
   };
 
   const attendanceRate = stats.totalEmployees > 0 
     ? Math.round((stats.present / stats.totalEmployees) * 100) 
     : 0;
 
-  // Handle marking attendance
-  const handleMarkAttendance = async (
-    employeeId: string, 
-    status: AttendanceRecord['status'], 
-    notes?: string
-  ) => {
+  // Handle approving check-in or check-out
+  const handleApprove = async (employeeEmail: string, employeeName: string, type: 'check-in' | 'check-out') => {
     try {
-      setMarkingLoading(true);
+      setApprovingLoading(true);
       
-      // TODO: Once you have the mark attendance endpoint, uncomment this:
-      // await api.markAttendance({
-      //   employeeId,
-      //   date: selectedDate,
-      //   status,
-      //   notes,
-      //   checkIn: status !== 'absent' ? new Date().toISOString() : null,
-      // });
+      await api.approveAttendance(employeeEmail);
       
-      // For now, show pending message
-      setErrorMessage('Mark attendance API is not yet implemented. Coming soon!');
-      setIsErrorModalOpen(true);
+      await loadData(true);
+      setSuccessMessage(`${type === 'check-in' ? 'Check-in' : 'Check-out'} approved for ${employeeName}!`);
+      setIsSuccessModalOpen(true);
       
-      // await loadData();
-      // setSuccessMessage(`Attendance marked successfully!`);
-      // setIsSuccessModalOpen(true);
+      // Remove from approval requests
+      setApprovalRequests(prev => 
+        prev.filter(req => req.employeeId !== employeeEmail)
+      );
+      
+      // Close modal if no more requests
+      if (approvalRequests.length <= 1) {
+        setShowApprovalModal(false);
+      }
+      
     } catch (error: any) {
-      console.error('Failed to mark attendance:', error);
+      console.error('Failed to approve:', error);
       setErrorMessage(
-        error?.response?.data?.message || 
         error?.message || 
-        'Failed to mark attendance. Please try again.'
+        `Failed to approve ${type}. Please try again.`
       );
       setIsErrorModalOpen(true);
     } finally {
-      setMarkingLoading(false);
+      setApprovingLoading(false);
     }
   };
 
   // Get employees who haven't been marked for attendance today
   const unmarkedEmployees = employees.filter(emp => 
-    !attendanceRecords.some(record => record.employeeId === emp.id)
+    !attendanceRecords.some(record => record.employeeId === emp.email)
   );
 
   // Table columns for attendance records
@@ -152,7 +209,7 @@ export default function Attendance() {
           </div>
           <div>
             <div className="font-medium text-gray-900">{value}</div>
-            <div className="text-sm text-gray-500">ID: {row.employeeId}</div>
+            <div className="text-sm text-gray-500">{row.employeeId}</div>
           </div>
         </div>
       ),
@@ -161,26 +218,40 @@ export default function Attendance() {
       key: 'checkIn',
       label: 'Check In',
       width: '15%',
-      render: (value: string | null) => (
-        <span className={`${value ? 'text-gray-900' : 'text-gray-400'}`}>
-          {value ? formatTime(value) : 'Not checked in'}
-        </span>
+      render: (value: string | null, row: AttendanceRecord) => (
+        <div>
+          <span className={`${value ? 'text-gray-900' : 'text-gray-400'}`}>
+            {value ? formatTime(value) : 'Not checked in'}
+          </span>
+          {row.status === 'check-in-requested' && (
+            <span className="block text-xs text-orange-600 font-medium mt-1">
+              ⏳ Pending approval
+            </span>
+          )}
+        </div>
       ),
     },
     {
       key: 'checkOut',
       label: 'Check Out',
       width: '15%',
-      render: (value: string | null) => (
-        <span className={`${value ? 'text-gray-900' : 'text-gray-400'}`}>
-          {value ? formatTime(value) : 'Not checked out'}
-        </span>
+      render: (value: string | null, row: AttendanceRecord) => (
+        <div>
+          <span className={`${value ? 'text-gray-900' : 'text-gray-400'}`}>
+            {value ? formatTime(value) : 'Not checked out'}
+          </span>
+          {row.status === 'check-out-requested' && (
+            <span className="block text-xs text-orange-600 font-medium mt-1">
+              ⏳ Pending approval
+            </span>
+          )}
+        </div>
       ),
     },
     {
       key: 'workingHours',
       label: 'Working Hours',
-      width: '15%',
+      width: '12%',
       render: (value: number) => (
         <span className="font-medium">{value.toFixed(1)}h</span>
       ),
@@ -188,17 +259,44 @@ export default function Attendance() {
     {
       key: 'status',
       label: 'Status',
-      width: '15%',
+      width: '13%',
       render: (value: string) => <StatusBadge status={value} type="attendance" />,
     },
     {
-      key: 'notes',
-      label: 'Notes',
-      width: '20%',
-      render: (value?: string) => (
-        <span className="text-sm text-gray-600 truncate max-w-32 block">
-          {value || 'No notes'}
-        </span>
+      key: 'actions',
+      label: 'Actions',
+      width: '15%',
+      render: (value: any, row: AttendanceRecord) => (
+        <div className="flex items-center space-x-2">
+          {row.status === 'check-in-requested' && (
+            <button
+              onClick={() => handleApprove(row.employeeId, row.employeeName, 'check-in')}
+              disabled={approvingLoading}
+              className="px-3 py-1 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+            >
+              ✓ Approve Check-in
+            </button>
+          )}
+          {row.status === 'check-out-requested' && (
+            <button
+              onClick={() => handleApprove(row.employeeId, row.employeeName, 'check-out')}
+              disabled={approvingLoading}
+              className="px-3 py-1 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+            >
+              ✓ Approve Check-out
+            </button>
+          )}
+          {row.status === 'checked-in' && (
+            <span className="text-sm text-green-600 font-medium">
+              ✓ Checked In
+            </span>
+          )}
+          {row.status === 'present' && (
+            <span className="text-sm text-gray-500">
+              Completed
+            </span>
+          )}
+        </div>
       ),
     },
   ];
@@ -213,19 +311,51 @@ export default function Attendance() {
           <h1 className="text-2xl font-bold text-gray-900">Attendance Management</h1>
           <p className="text-gray-600 mt-1">Track and manage employee attendance</p>
         </div>
-        {isToday && (
+        <div className="flex items-center space-x-3">
+          {/* Auto-refresh toggle */}
+          <div className="flex items-center space-x-2 px-3 py-2 bg-gray-100 rounded-lg">
+            <input
+              type="checkbox"
+              id="autoRefresh"
+              checked={autoRefresh}
+              onChange={(e) => setAutoRefresh(e.target.checked)}
+              className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+            />
+            <label htmlFor="autoRefresh" className="text-sm text-gray-700 cursor-pointer">
+              Auto-refresh (10s)
+            </label>
+          </div>
+          
+          {/* Manual refresh button */}
           <button 
-            onClick={() => setIsMarkAttendanceOpen(true)}
-            className="btn-primary flex items-center"
+            onClick={() => loadData()}
+            disabled={loading}
+            className="btn-secondary flex items-center disabled:opacity-50"
           >
-            <span className="mr-2">📋</span>
-            Mark Attendance
+            <span className="mr-2">🔄</span>
+            {loading ? 'Refreshing...' : 'Refresh'}
           </button>
-        )}
+          
+          {/* Approval requests button */}
+          {approvalRequests.length > 0 && (
+            <button
+              onClick={() => setShowApprovalModal(true)}
+              className="btn-primary flex items-center animate-pulse"
+            >
+              <span className="mr-2">🔔</span>
+              {approvalRequests.length} Pending Approval{approvalRequests.length > 1 ? 's' : ''}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Last refresh time */}
+      <div className="text-sm text-gray-500">
+        Last updated: {lastRefresh.toLocaleTimeString('en-IN')}
       </div>
 
       {/* Date Picker and Stats */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
         {/* Date Picker */}
         <div className="card">
           <DatePicker
@@ -270,6 +400,18 @@ export default function Attendance() {
             <div>
               <p className="text-sm font-medium text-gray-600">Absent</p>
               <p className="text-2xl font-bold text-red-600">{stats.absent}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="flex items-center">
+            <div className="p-3 rounded-full bg-orange-50 mr-4">
+              <span className="text-2xl">⏳</span>
+            </div>
+            <div>
+              <p className="text-sm font-medium text-gray-600">Pending</p>
+              <p className="text-2xl font-bold text-orange-600">{stats.pendingApprovals}</p>
             </div>
           </div>
         </div>
@@ -322,7 +464,7 @@ export default function Attendance() {
           </div>
           <div className="text-center p-3 bg-blue-50 rounded-lg">
             <div className="text-xl font-bold text-blue-600">{unmarkedEmployees.length}</div>
-            <div className="text-sm text-blue-800">Unmarked</div>
+            <div className="text-sm text-blue-800">Not Marked</div>
           </div>
         </div>
       </div>
@@ -335,19 +477,18 @@ export default function Attendance() {
         emptyMessage={`No attendance records found for ${new Date(selectedDate).toLocaleDateString('en-IN')}`}
       />
 
-      {/* Mark Attendance Modal */}
+      {/* Approval Requests Modal */}
       <Modal
-        isOpen={isMarkAttendanceOpen}
-        onClose={() => setIsMarkAttendanceOpen(false)}
-        title="Mark Attendance"
+        isOpen={showApprovalModal}
+        onClose={() => setShowApprovalModal(false)}
+        title="Pending Approval Requests"
         size="lg"
       >
-        <MarkAttendanceForm
-          employees={unmarkedEmployees}
-          allEmployees={employees}
-          onSubmit={handleMarkAttendance}
-          onCancel={() => setIsMarkAttendanceOpen(false)}
-          loading={markingLoading}
+        <ApprovalRequestsModal
+          requests={approvalRequests}
+          onApprove={handleApprove}
+          loading={approvingLoading}
+          onClose={() => setShowApprovalModal(false)}
         />
       </Modal>
 
@@ -373,157 +514,101 @@ export default function Attendance() {
   );
 }
 
-// Mark Attendance Form Component
-function MarkAttendanceForm({ 
-  employees,
-  allEmployees,
-  onSubmit, 
-  onCancel, 
-  loading 
+// Approval Requests Modal Component
+function ApprovalRequestsModal({ 
+  requests,
+  onApprove, 
+  loading,
+  onClose 
 }: {
-  employees: Employee[];
-  allEmployees: Employee[];
-  onSubmit: (employeeId: string, status: AttendanceRecord['status'], notes?: string) => Promise<void>;
-  onCancel: () => void;
+  requests: ApprovalRequest[];
+  onApprove: (employeeId: string, employeeName: string, type: 'check-in' | 'check-out') => Promise<void>;
   loading: boolean;
+  onClose: () => void;
 }) {
-  const [selectedEmployees, setSelectedEmployees] = useState<Record<string, {
-    status: AttendanceRecord['status'];
-    notes: string;
-  }>>({});
-
-  const handleEmployeeSelect = (employeeId: string, status: AttendanceRecord['status']) => {
-    setSelectedEmployees(prev => ({
-      ...prev,
-      [employeeId]: { status, notes: prev[employeeId]?.notes || '' }
-    }));
-  };
-
-  const handleNotesChange = (employeeId: string, notes: string) => {
-    setSelectedEmployees(prev => ({
-      ...prev,
-      [employeeId]: { 
-        status: prev[employeeId]?.status || 'present', 
-        notes 
-      }
-    }));
-  };
-
-  const handleSubmit = async () => {
-    const selectedIds = Object.keys(selectedEmployees);
-    if (selectedIds.length === 0) {
-      alert('Please select at least one employee and their attendance status');
-      return;
-    }
-
-    try {
-      for (const employeeId of selectedIds) {
-        const { status, notes } = selectedEmployees[employeeId];
-        await onSubmit(employeeId, status, notes);
-      }
-      onCancel();
-    } catch (error) {
-      console.error('Failed to mark attendance:', error);
-    }
-  };
-
-  // If no employees to show
-  if (allEmployees.length === 0) {
-    return (
-      <div className="text-center py-8">
-        <div className="text-gray-400 text-6xl mb-4">👥</div>
-        <h3 className="text-lg font-medium text-gray-900 mb-2">No Employees Found</h3>
-        <p className="text-gray-500">Please add employees first to mark attendance.</p>
-      </div>
-    );
-  }
-
-  if (employees.length === 0) {
+  if (requests.length === 0) {
     return (
       <div className="text-center py-8">
         <div className="text-gray-400 text-6xl mb-4">✅</div>
         <h3 className="text-lg font-medium text-gray-900 mb-2">All Caught Up!</h3>
-        <p className="text-gray-500">All employees have been marked for attendance today.</p>
+        <p className="text-gray-500">No pending approval requests at the moment.</p>
+        <button
+          onClick={onClose}
+          className="mt-4 btn-secondary"
+        >
+          Close
+        </button>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <p className="text-gray-600">
-        Mark attendance for {employees.length} employee{employees.length !== 1 ? 's' : ''} who haven't been marked today.
+    <div className="space-y-4">
+      <p className="text-gray-600 mb-4">
+        You have {requests.length} pending approval request{requests.length > 1 ? 's' : ''}.
       </p>
 
-      <div className="space-y-4 max-h-96 overflow-y-auto">
-        {employees.map(employee => (
-          <div key={employee.id} className="border border-gray-200 rounded-lg p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center">
-                <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center text-white font-bold mr-3">
-                  {(employee.fullName || employee.name)?.charAt(0).toUpperCase() || 'E'}
+      <div className="space-y-3 max-h-96 overflow-y-auto">
+        {requests.map((request, index) => (
+          <div 
+            key={`${request.employeeId}-${request.type}-${index}`}
+            className="border border-orange-200 bg-orange-50 rounded-lg p-4 animate-pulse-slow"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center flex-1">
+                <div className="w-12 h-12 bg-orange-500 rounded-full flex items-center justify-center text-white font-bold mr-4">
+                  {request.employeeName.charAt(0).toUpperCase()}
                 </div>
-                <div>
-                  <div className="font-medium text-gray-900">{employee.fullName || employee.name}</div>
-                  <div className="text-sm text-gray-500">{employee.position || employee.department || 'Employee'}</div>
+                <div className="flex-1">
+                  <div className="font-medium text-gray-900 text-lg">
+                    {request.employeeName}
+                  </div>
+                  <div className="text-sm text-gray-600">
+                    {request.employeeId}
+                  </div>
+                  <div className="text-sm text-orange-700 font-medium mt-1">
+                    {request.type === 'check-in' ? '🔔 Requesting Check-In' : '🔔 Requesting Check-Out'}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    Time: {formatTime(request.time)}
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {/* Status Selection */}
-            <div className="grid grid-cols-4 gap-2 mb-3">
-              {(['present', 'late', 'half-day', 'absent'] as const).map(status => (
-                <button
-                  key={status}
-                  onClick={() => handleEmployeeSelect(employee.id, status)}
-                  className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors duration-200 ${
-                    selectedEmployees[employee.id]?.status === status
-                      ? status === 'present' ? 'bg-green-600 text-white' :
-                        status === 'late' ? 'bg-yellow-600 text-white' :
-                        status === 'half-day' ? 'bg-blue-600 text-white' :
-                        'bg-red-600 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                >
-                  {status === 'half-day' ? 'Half Day' : status.charAt(0).toUpperCase() + status.slice(1)}
-                </button>
-              ))}
+              <button
+                onClick={() => onApprove(request.employeeId, request.employeeName, request.type)}
+                disabled={loading}
+                className={`px-4 py-2 rounded-lg font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center ${
+                  request.type === 'check-in' ? 'bg-green-600 hover:bg-green-700' : 'bg-blue-600 hover:bg-blue-700'
+                }`}
+              >
+                {loading ? (
+                  <>
+                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Approving...
+                  </>
+                ) : (
+                  <>
+                    <span className="mr-2">✓</span>
+                    Approve {request.type === 'check-in' ? 'Check-In' : 'Check-Out'}
+                  </>
+                )}
+              </button>
             </div>
-
-            {/* Notes */}
-            {selectedEmployees[employee.id] && (
-              <textarea
-                placeholder="Add notes (optional)"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                rows={2}
-                value={selectedEmployees[employee.id]?.notes || ''}
-                onChange={(e) => handleNotesChange(employee.id, e.target.value)}
-              />
-            )}
           </div>
         ))}
       </div>
 
-      {/* Actions */}
-      <div className="flex items-center justify-end space-x-4 pt-4 border-t border-gray-200">
+      <div className="flex justify-end pt-4 border-t border-gray-200">
         <button
-          onClick={onCancel}
+          onClick={onClose}
           disabled={loading}
           className="btn-secondary disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          Cancel
-        </button>
-        <button
-          onClick={handleSubmit}
-          disabled={loading || Object.keys(selectedEmployees).length === 0}
-          className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
-        >
-          {loading && (
-            <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
-          )}
-          Mark Attendance ({Object.keys(selectedEmployees).length})
+          Close
         </button>
       </div>
     </div>
