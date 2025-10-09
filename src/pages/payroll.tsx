@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { api, formatCurrency } from '../lib/api';
+import { api, formatCurrency, parseApiError } from '../lib/api';
 import type { PayrollRecord, Employee,  } from '../lib/api';
 import Table, { StatusBadge, ActionButton } from '../components/Table';
 import Modal, { ConfirmModal, SuccessModal } from '../components/Modal';
@@ -17,7 +17,9 @@ export default function Payroll() {
   // Modal states
   const [isGenerateModalOpen, setIsGenerateModalOpen] = useState(false);
   const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
+  const [isErrorModalOpen, setIsErrorModalOpen] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');  // ✅ Add this
   const [generateLoading, setGenerateLoading] = useState(false);
 
   useEffect(() => {
@@ -29,12 +31,14 @@ export default function Payroll() {
       setLoading(true);
       const [payrollData, employeesData] = await Promise.all([
         api.getPayrollRecords(),
-        api.getaEmployees()
+        api.getEmployees()
       ]);
       setPayrollRecords(payrollData);
       setEmployees(employeesData);
     } catch (error) {
       console.error('Failed to load payroll data:', error);
+      setErrorMessage(parseApiError(error));  // ✅ Use parseApiError
+      setIsErrorModalOpen(true);
     } finally {
       setLoading(false);
     }
@@ -81,6 +85,8 @@ export default function Payroll() {
       setIsSuccessModalOpen(true);
     } catch (error) {
       console.error('Failed to generate payroll:', error);
+      setErrorMessage(parseApiError(error));  // ✅ Use parseApiError
+      setIsErrorModalOpen(true);
     } finally {
       setGenerateLoading(false);
     }
@@ -348,6 +354,16 @@ export default function Payroll() {
         onClose={() => setIsSuccessModalOpen(false)}
         title="Success"
         message={successMessage}
+      />
+      {/* Error Modal - ADD THIS */}
+      <ConfirmModal
+        isOpen={isErrorModalOpen}
+        onClose={() => setIsErrorModalOpen(false)}
+        onConfirm={() => setIsErrorModalOpen(false)}
+        title="Error"
+        message={errorMessage}
+        confirmText="OK"
+        type="danger"
       />
     </div>
   );

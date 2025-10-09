@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { api } from '../lib/api';
+import { api, parseApiError } from '../lib/api';
 import Table, { StatusBadge, ActionButton } from '../components/Table';
 import Modal, { SuccessModal, ConfirmModal } from '../components/Modal';
 import DatePicker from '../components/DatePicker';
@@ -134,7 +134,7 @@ export default function Attendance() {
     } catch (error: any) {
       console.error('Failed to load attendance data:', error);
       if (!silent) {
-        setErrorMessage(error?.message || 'Failed to load attendance data');
+        setErrorMessage(parseApiError(error));  // ✅ Use parseApiError
         setIsErrorModalOpen(true);
       }
     } finally {
@@ -181,10 +181,8 @@ export default function Attendance() {
       
     } catch (error: any) {
       console.error('Failed to approve:', error);
-      setErrorMessage(
-        error?.message || 
-        `Failed to approve ${type}. Please try again.`
-      );
+      setErrorMessage(parseApiError(error));  // ✅ Use parseApiError
+      setIsErrorModalOpen(true);
       setIsErrorModalOpen(true);
     } finally {
       setApprovingLoading(false);
@@ -515,6 +513,7 @@ export default function Attendance() {
 }
 
 // Approval Requests Modal Component
+// Approval Requests Modal Component
 function ApprovalRequestsModal({ 
   requests,
   onApprove, 
@@ -526,6 +525,14 @@ function ApprovalRequestsModal({
   loading: boolean;
   onClose: () => void;
 }) {
+  // TODO: Add reject handler when API endpoint is available
+  const handleReject = async (employeeId: string, employeeName: string, type: 'check-in' | 'check-out') => {
+    // TODO: Implement reject API call
+    // await api.rejectAttendance(employeeId);
+    console.log(`Reject ${type} for ${employeeName} (${employeeId})`);
+    alert('Reject functionality will be implemented when API endpoint is available');
+  };
+
   if (requests.length === 0) {
     return (
       <div className="text-center py-8">
@@ -575,28 +582,42 @@ function ApprovalRequestsModal({
                 </div>
               </div>
 
-              <button
-                onClick={() => onApprove(request.employeeId, request.employeeName, request.type)}
-                disabled={loading}
-                className={`px-4 py-2 rounded-lg font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center ${
-                  request.type === 'check-in' ? 'bg-green-600 hover:bg-green-700' : 'bg-blue-600 hover:bg-blue-700'
-                }`}
-              >
-                {loading ? (
-                  <>
-                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    Approving...
-                  </>
-                ) : (
-                  <>
-                    <span className="mr-2">✓</span>
-                    Approve {request.type === 'check-in' ? 'Check-In' : 'Check-Out'}
-                  </>
-                )}
-              </button>
+              {/* Action Buttons: Approve & Reject */}
+              <div className="flex space-x-2">
+                {/* Approve Button */}
+                <button
+                  onClick={() => onApprove(request.employeeId, request.employeeName, request.type)}
+                  disabled={loading}
+                  className={`px-4 py-2 rounded-lg font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center ${
+                    request.type === 'check-in' ? 'bg-green-600 hover:bg-green-700' : 'bg-blue-600 hover:bg-blue-700'
+                  }`}
+                >
+                  {loading ? (
+                    <>
+                      <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Approving...
+                    </>
+                  ) : (
+                    <>
+                      <span className="mr-2">✓</span>
+                      Approve
+                    </>
+                  )}
+                </button>
+
+                {/* Reject Button - TODO: Connect to API when available */}
+                <button
+                  onClick={() => handleReject(request.employeeId, request.employeeName, request.type)}
+                  disabled={loading}
+                  className="px-4 py-2 rounded-lg font-medium text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+                >
+                  <span className="mr-2">✗</span>
+                  Reject
+                </button>
+              </div>
             </div>
           </div>
         ))}

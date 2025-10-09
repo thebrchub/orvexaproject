@@ -18,10 +18,19 @@ export const toUTC = (date: Date): string => new Date(date).toISOString();
 export const parseApiError = (error: any): string => {
   if (axios.isAxiosError(error)) {
     const data = error.response?.data;
+    
+    // Handle format: {"code":400,"message":"Validation failed","details":["Invalid Password!"]}
     if (data?.details && Array.isArray(data.details)) {
       return data.details.join(", ");
     }
-    return data?.message || "Unexpected API error";
+    
+    // Handle format: {"title":"Constraint Violation","violations":[{"field":"...","message":"..."}]}
+    if (data?.violations && Array.isArray(data.violations)) {
+      return data.violations.map((v: any) => v.message).join(", ");
+    }
+    
+    // Fallback to message or title
+    return data?.message || data?.title || "Unexpected API error";
   }
   return "Unknown error";
 };
@@ -164,6 +173,7 @@ export interface AddEmployeeRequest {
     pan: string;
     accountNo: number;
     ifsc: string;
+    department?: string;
   };
 }
 

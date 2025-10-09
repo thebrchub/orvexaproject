@@ -1,15 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { api } from '../lib/api';
+import { api, parseApiError } from '../lib/api';
 import type { AddEmployeeRequest } from '../lib/api';
 import TableColumn, { StatusBadge, ActionButton } from '../components/Table';
 import ModalProps, { ConfirmModal, SuccessModal } from '../components/Modal';
 import EmployeeFormProps from '../components/EmployeeForm';
 import type { AddEmployeeResponse } from '../lib/api';
-// Import utility functions
 import { formatDate, formatCurrency } from '../utils/timeUtils';
 
-
-// Employee interface
 interface Employee {
   id: string;
   employeeId: string;
@@ -35,7 +32,6 @@ interface Employee {
   updatedAt?: string;
 }
 
-// Add this right after your imports
 interface EmployeeResponse {
   id: string | number;
   name: string;
@@ -59,13 +55,14 @@ interface EmployeeResponse {
   updatedAt?: string;
 }
 
-
 export default function Employees() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDepartment, setSelectedDepartment] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('');
+  const [sortOption, setSortOption] = useState("name");
+  const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -82,52 +79,44 @@ export default function Employees() {
 
   useEffect(() => { loadEmployees(); }, []);
 
-    const loadEmployees = async () => {
-      try {
-        setLoading(true);
+  const loadEmployees = async () => {
+    try {
+      setLoading(true);
+      const data = await api.getAllEmployees();
+      
+      const mappedEmployees: Employee[] = data.map((emp: EmployeeResponse) => {
+        const details = emp.details || { salary: 0, aadhar: '', pan: '', accountNo: 0, ifsc: '' };
+        return {
+          id: emp.id.toString(),
+          employeeId: emp.id.toString(),
+          name: emp.name || 'N/A',
+          fullName: emp.name || 'N/A',
+          email: emp.email || 'N/A',
+          mobile: emp.mobile || 'N/A',
+          doj: emp.doj || '',
+          dob: emp.dob || '',
+          salary: details.salary || 0,
+          aadhar: details.aadhar || '',
+          pan: details.pan || '',
+          accountNo: details.accountNo?.toString() || '',
+          ifsc: details.ifsc || '',
+          status: emp.status || 'active',
+          position: emp.position || 'N/A',
+          department: emp.department || 'N/A',
+          workLocation: emp.workLocation || 'N/A',
+        };
+      });
 
-        // Fetch all employees
-        const data = await api.getAllEmployees();
-
-        // Map API response to frontend Employee type
-       const mappedEmployees: Employee[] = data.map((emp: EmployeeResponse) => {
-  const details = emp.details || { salary: 0, aadhar: '', pan: '', accountNo: 0, ifsc: '' };
-
-  return {
-    id: emp.id.toString(),
-    employeeId: emp.id.toString(),
-    name: emp.name || 'N/A',
-    fullName: emp.name || 'N/A',
-    email: emp.email || 'N/A',
-    mobile: emp.mobile || 'N/A',
-    doj: emp.doj || '',
-    dob: emp.dob || '',
-    salary: details.salary || 0,
-    aadhar: details.aadhar || '',
-    pan: details.pan || '',
-    accountNo: details.accountNo?.toString() || '',
-    ifsc: details.ifsc || '',
-    status: emp.status || 'active',
-    position: emp.position || 'N/A',
-    department: emp.department || 'N/A',
-    workLocation: emp.workLocation || 'N/A',
+      setEmployees(mappedEmployees);
+    } catch (error: any) {
+      console.error('Failed to load employees:', error);
+      setErrorMessage(parseApiError(error));  // ✅ Use parseApiError
+      setIsErrorModalOpen(true);
+    } finally {
+      setLoading(false);
+    }
   };
-});
 
-
-
-        setEmployees(mappedEmployees);
-      } catch (error: any) {
-        console.error('Failed to load employees:', error);
-        setErrorMessage(error?.response?.data?.message || error.message || 'Failed to load employees');
-        setIsErrorModalOpen(true);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-
-  // Filters
   const filteredEmployees = employees.filter(emp => {
     const matchesSearch =
       emp.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -142,6 +131,19 @@ export default function Employees() {
     return matchesSearch && matchesDept && matchesStatus;
   });
 
+  const sortedEmployees = [...filteredEmployees].sort((a, b) => {
+    switch (sortOption) {
+      case "name":
+        return a.name.localeCompare(b.name);
+      case "salary":
+        return (b.salary || 0) - (a.salary || 0);
+      case "doj":
+        return new Date(b.doj).getTime() - new Date(a.doj).getTime();
+      default:
+        return 0;
+    }
+  });
+
   const departments = [...new Set(employees.map(emp => emp.department).filter(Boolean))];
   const statuses = [...new Set(employees.map(emp => emp.status).filter(Boolean))];
 
@@ -153,62 +155,35 @@ export default function Employees() {
     remoteWorkers: employees.filter(emp => emp.workLocation === 'remote').length,
   };
 
-    const [sortOption, setSortOption] = useState("name");
-
-    const sortedEmployees = [...filteredEmployees].sort((a, b) => {
-      switch (sortOption) {
-        case "name":
-          return a.name.localeCompare(b.name);
-        case "salary":
-          return (b.salary || 0) - (a.salary || 0);
-        case "doj":
-          return new Date(b.doj).getTime() - new Date(a.doj).getTime();
-        default:
-          return 0;
-      }
-    });
-
-
   const handleCreateEmployee = async (formData: any) => {
     try {
       setFormLoading(true);
-      console.log('🔍 Form Data Received:', JSON.stringify(formData, null, 2));
+      console.log('Form Data Received:', JSON.stringify(formData, null, 2));
       
-      // Validate that we have required data
       if (!formData.email || !formData.name) {
         throw new Error('Email and name are required');
       }
 
-      // The EmployeeForm already sends data in the correct API format
-      // Just add the ID and use it directly
       const employeeData: AddEmployeeRequest = {
         ...formData,
         id: Date.now(),
       };
 
-      console.log('📦 Prepared Employee Data:', JSON.stringify(employeeData, null, 2));
-
-      // API call
+      console.log('Prepared Employee Data:', JSON.stringify(employeeData, null, 2));
       const responseFromApi = await api.addEmployee(employeeData);
-
-      // Reload employee list
       await loadEmployees();
 
       setIsAddModalOpen(false);
       setSuccessMessage(`Employee ${employeeData.name} added successfully!`);
       setIsSuccessModalOpen(true);
-
     } catch (error: any) {
       console.error('Failed to create employee:', error);
-      setErrorMessage(
-        error?.response?.data?.message || error?.message || 'Failed to add employee. Please try again.'
-      );
+      setErrorMessage(parseApiError(error));  // ✅ Use parseApiError
       setIsErrorModalOpen(true);
     } finally {
       setFormLoading(false);
     }
   };
-
 
   const handleUpdateEmployee = async (formData: any) => {
     setErrorMessage('Update employee API is not yet implemented.');
@@ -220,7 +195,6 @@ export default function Employees() {
     setIsErrorModalOpen(true);
   };
 
-  // Table columns
   const columns = [
     {
       key: "serial",
@@ -236,13 +210,13 @@ export default function Employees() {
       width: '20%',
       render: (_: string, row: Employee) => (
         <div className="flex items-center">
-          <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center text-white font-bold mr-3">
+          <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center text-white font-bold mr-3 flex-shrink-0">
             {row.name?.charAt(0).toUpperCase() || 'E'}
           </div>
-          <div>
-            <div className="font-medium text-gray-900">{row.name}</div>
-            <div className="text-sm text-gray-500">{row.employeeId}</div>
-            <div className="text-xs text-gray-400">{row.email}</div>
+          <div className="min-w-0">
+            <div className="font-medium text-gray-900 truncate">{row.name}</div>
+            <div className="text-sm text-gray-500 truncate">{row.employeeId}</div>
+            <div className="text-xs text-gray-400 truncate">{row.email}</div>
           </div>
         </div>
       ),
@@ -287,7 +261,7 @@ export default function Employees() {
     {
       key: 'actions',
       label: 'Actions',
-      width: '19%',
+      width: '13%',
       render: (_: any, row: Employee) => (
         <div className="flex space-x-1">
           <ActionButton icon="👁️" label="View" onClick={() => { setSelectedEmployee(row); setIsViewModalOpen(true); }} variant="secondary" size="sm" />
@@ -299,71 +273,71 @@ export default function Employees() {
   ];
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <div className="space-y-4 sm:space-y-6 animate-fade-in p-3 sm:p-0">
+      {/* Header - Responsive */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Employee Management</h1>
-          <p className="text-gray-600 mt-1">Manage employee records and documentation</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Employee Management</h1>
+          <p className="text-sm sm:text-base text-gray-600 mt-1">Manage employee records and documentation</p>
         </div>
         <button 
           onClick={() => setIsAddModalOpen(true)}
-          className="btn-primary flex items-center"
+          className="btn-primary flex items-center justify-center text-sm sm:text-base whitespace-nowrap"
         >
           <span className="mr-2">➕</span>
           Add Employee
         </button>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <div className="card">
-          <div className="flex items-center">
-            <div className="p-3 rounded-full bg-blue-50 mr-4">
-              <span className="text-2xl">👥</span>
+      {/* Stats Cards - Responsive Grid */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6">
+        <div className="card p-3 sm:p-4">
+          <div className="flex items-start sm:items-center">
+            <div className="p-2 sm:p-3 rounded-full bg-blue-50 mr-2 sm:mr-4 flex-shrink-0">
+              <span className="text-lg sm:text-2xl">👥</span>
             </div>
-            <div>
-              <p className="text-sm font-medium text-gray-600">Total Employees</p>
-              <p className="text-2xl font-bold text-blue-600">{stats.total}</p>
-              <p className="text-xs text-gray-500">{stats.active} active</p>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs sm:text-sm font-medium text-gray-600 truncate">Total Employees</p>
+              <p className="text-lg sm:text-2xl font-bold text-blue-600">{stats.total}</p>
+              <p className="text-xs text-gray-500 truncate">{stats.active} active</p>
             </div>
           </div>
         </div>
         
-        <div className="card">
-          <div className="flex items-center">
-            <div className="p-3 rounded-full bg-green-50 mr-4">
-              <span className="text-2xl">💰</span>
+        <div className="card p-3 sm:p-4">
+          <div className="flex items-start sm:items-center">
+            <div className="p-2 sm:p-3 rounded-full bg-green-50 mr-2 sm:mr-4 flex-shrink-0">
+              <span className="text-lg sm:text-2xl">💰</span>
             </div>
-            <div>
-              <p className="text-sm font-medium text-gray-600">Total Salaries</p>
-              <p className="text-2xl font-bold text-green-600">{formatCurrency(stats.totalSalaries)}</p>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs sm:text-sm font-medium text-gray-600 truncate">Total Salaries</p>
+              <p className="text-base sm:text-2xl font-bold text-green-600 truncate">{formatCurrency(stats.totalSalaries)}</p>
               <p className="text-xs text-gray-500">monthly</p>
             </div>
           </div>
         </div>
         
-        <div className="card">
-          <div className="flex items-center">
-            <div className="p-3 rounded-full bg-yellow-50 mr-4">
-              <span className="text-2xl">🏢</span>
+        <div className="card p-3 sm:p-4">
+          <div className="flex items-start sm:items-center">
+            <div className="p-2 sm:p-3 rounded-full bg-yellow-50 mr-2 sm:mr-4 flex-shrink-0">
+              <span className="text-lg sm:text-2xl">🏢</span>
             </div>
-            <div>
-              <p className="text-sm font-medium text-gray-600">Departments</p>
-              <p className="text-2xl font-bold text-yellow-600">{stats.departments}</p>
-              <p className="text-xs text-gray-500">{stats.remoteWorkers} remote</p>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs sm:text-sm font-medium text-gray-600 truncate">Departments</p>
+              <p className="text-lg sm:text-2xl font-bold text-yellow-600">{stats.departments}</p>
+              <p className="text-xs text-gray-500 truncate">{stats.remoteWorkers} remote</p>
             </div>
           </div>
         </div>
         
-        <div className="card">
-          <div className="flex items-center">
-            <div className="p-3 rounded-full bg-purple-50 mr-4">
-              <span className="text-2xl">📊</span>
+        <div className="card p-3 sm:p-4">
+          <div className="flex items-start sm:items-center">
+            <div className="p-2 sm:p-3 rounded-full bg-purple-50 mr-2 sm:mr-4 flex-shrink-0">
+              <span className="text-lg sm:text-2xl">📊</span>
             </div>
-            <div>
-              <p className="text-sm font-medium text-gray-600">Avg Salary</p>
-              <p className="text-2xl font-bold text-purple-600">
+            <div className="min-w-0 flex-1">
+              <p className="text-xs sm:text-sm font-medium text-gray-600 truncate">Avg Salary</p>
+              <p className="text-base sm:text-2xl font-bold text-purple-600 truncate">
                 {stats.total > 0 ? formatCurrency(stats.totalSalaries / stats.total) : '₹0'}
               </p>
               <p className="text-xs text-gray-500">per employee</p>
@@ -372,15 +346,26 @@ export default function Employees() {
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="card">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between space-y-4 lg:space-y-0 lg:space-x-4">
+      {/* Filters - Responsive */}
+      <div className="card p-3 sm:p-4">
+        {/* Mobile Filter Toggle */}
+        <div className="lg:hidden mb-3">
+          <button
+            onClick={() => setIsMobileFiltersOpen(!isMobileFiltersOpen)}
+            className="w-full flex items-center justify-between px-3 py-2 bg-gray-100 rounded-lg text-sm font-medium"
+          >
+            <span>Filters & Sort</span>
+            <span>{isMobileFiltersOpen ? '▲' : '▼'}</span>
+          </button>
+        </div>
+
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between space-y-3 lg:space-y-0 lg:space-x-4">
           <div className="flex-1">
             <div className="relative">
               <input
                 type="text"
-                placeholder="Search by name, employee ID, email, phone, or position..."
-                className="input-field pl-10"
+                placeholder="Search by name, ID, email, phone..."
+                className="input-field pl-10 text-sm"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
@@ -392,12 +377,12 @@ export default function Employees() {
             </div>
           </div>
           
-          <div className="flex flex-col md:flex-row space-y-2 md:space-y-0 md:space-x-4">
+          <div className={`${isMobileFiltersOpen ? 'flex' : 'hidden'} lg:flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-3 w-full lg:w-auto`}>
             {departments.length > 0 && (
               <select
                 value={selectedDepartment}
                 onChange={(e) => setSelectedDepartment(e.target.value)}
-                className="input-field min-w-40"
+                className="input-field min-w-full sm:min-w-40 text-sm"
               >
                 <option value="">All Departments</option>
                 {departments.map(dept => (
@@ -406,20 +391,15 @@ export default function Employees() {
               </select>
             )}
 
-            {statuses.length > 0 && (
-              <select
-                value={selectedStatus}
-                onChange={(e) => setSelectedStatus(e.target.value)}
-                className="input-field min-w-32"
-              >
-                <option value="">All Status</option>
-                {/* {statuses.map(status => (
-                  <option key={status} value={status}>
-                    {status.charAt(0).toUpperCase() + status.slice(1)}
-                  </option>
-                ))} */}
-              </select>
-            )}
+            <select
+              value={sortOption}
+              onChange={(e) => setSortOption(e.target.value)}
+              className="input-field min-w-full sm:min-w-36 text-sm"
+            >
+              <option value="name">Sort: Name (A–Z)</option>
+              <option value="salary">Sort: Salary (High → Low)</option>
+              <option value="doj">Sort: Join Date (New → Old)</option>
+            </select>
             
             {(searchTerm || selectedDepartment || selectedStatus) && (
               <button
@@ -428,7 +408,7 @@ export default function Employees() {
                   setSelectedDepartment('');
                   setSelectedStatus('');
                 }}
-                className="btn-secondary"
+                className="btn-secondary text-sm whitespace-nowrap"
               >
                 Clear Filters
               </button>
@@ -436,31 +416,88 @@ export default function Employees() {
           </div>
         </div>
         
-        <div className="mt-4 text-sm text-gray-600">
+        <div className="mt-3 text-xs sm:text-sm text-gray-600">
           Showing {filteredEmployees.length} of {employees.length} employees
         </div>
       </div>
 
-      <select
-        value={sortOption}
-        onChange={(e) => setSortOption(e.target.value)}
-        className="input-field min-w-36"
-      >
-        <option value="name">Sort by Name (A–Z)</option>
-        <option value="salary">Sort by Salary (High → Low)</option>
-        <option value="doj">Sort by Joining Date (Newest → Oldest)</option>
-      </select>
+      {/* Desktop Table - Hidden on mobile */}
+      <div className="hidden lg:block">
+        <TableColumn
+          columns={columns}
+          data={sortedEmployees}
+          loading={loading}
+          emptyMessage="No employees found."
+        />
+      </div>
 
+      {/* Mobile Cards - Hidden on desktop */}
+      <div className="lg:hidden space-y-3">
+        {loading ? (
+          <div className="flex justify-center py-12">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+          </div>
+        ) : sortedEmployees.length === 0 ? (
+          <div className="card p-8 text-center">
+            <p className="text-gray-500">No employees found.</p>
+          </div>
+        ) : (
+          sortedEmployees.map((emp, index) => (
+            <div key={emp.id} className="card p-4">
+              <div className="flex items-start justify-between mb-3">
+                <div className="flex items-center flex-1 min-w-0">
+                  <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center text-white font-bold mr-3 flex-shrink-0">
+                    {emp.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="font-semibold text-gray-900 truncate">{emp.name}</h3>
+                    <p className="text-sm text-gray-500 truncate">{emp.position}</p>
+                  </div>
+                </div>
+                <span className="text-xs font-medium text-gray-500 flex-shrink-0">#{index + 1}</span>
+              </div>
 
-      {/* Employees Table */}
-      <TableColumn
-        columns={columns}
-        data={sortedEmployees}
-        loading={loading}
-        emptyMessage="No employees found."
-      />
+              <div className="space-y-2 mb-3">
+                <div className="flex text-sm">
+                  <span className="text-gray-500 w-20 flex-shrink-0">Email:</span>
+                  <span className="text-gray-900 truncate">{emp.email}</span>
+                </div>
+                <div className="flex text-sm">
+                  <span className="text-gray-500 w-20 flex-shrink-0">Mobile:</span>
+                  <span className="text-gray-900">{emp.mobile}</span>
+                </div>
+                <div className="flex text-sm">
+                  <span className="text-gray-500 w-20 flex-shrink-0">Dept:</span>
+                  <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
+                    {emp.department}
+                  </span>
+                </div>
+                <div className="flex text-sm">
+                  <span className="text-gray-500 w-20 flex-shrink-0">Salary:</span>
+                  <span className="font-semibold text-green-600">{formatCurrency(emp.salary)}</span>
+                </div>
+              </div>
 
-      {/* View Employee Modal */}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setSelectedEmployee(emp); setIsViewModalOpen(true); }}
+                  className="flex-1 py-2 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg text-sm font-medium"
+                >
+                  View
+                </button>
+                <button
+                  onClick={() => { setSelectedEmployee(emp); setIsEditModalOpen(true); }}
+                  className="flex-1 py-2 bg-gray-50 hover:bg-gray-100 text-gray-600 rounded-lg text-sm font-medium"
+                >
+                  Edit
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Modals - All responsive */}
       {selectedEmployee && (
         <ModalProps
           isOpen={isViewModalOpen}
@@ -472,7 +509,6 @@ export default function Employees() {
         </ModalProps>
       )}
 
-      {/* Add Employee Modal */}
       <ModalProps
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
@@ -486,7 +522,6 @@ export default function Employees() {
         />
       </ModalProps>
 
-      {/* Edit Employee Modal */}
       <ModalProps
         isOpen={isEditModalOpen}
         onClose={() => setIsEditModalOpen(false)}
@@ -501,7 +536,6 @@ export default function Employees() {
         />
       </ModalProps>
 
-      {/* Delete Confirmation Modal */}
       <ConfirmModal
         isOpen={isDeleteModalOpen}
         onClose={() => setIsDeleteModalOpen(false)}
@@ -513,7 +547,6 @@ export default function Employees() {
         loading={deleteLoading}
       />
 
-      {/* Success Modal */}
       <SuccessModal
         isOpen={isSuccessModalOpen}
         onClose={() => setIsSuccessModalOpen(false)}
@@ -521,7 +554,6 @@ export default function Employees() {
         message={successMessage}
       />
 
-      {/* Error Modal */}
       <ConfirmModal
         isOpen={isErrorModalOpen}
         onClose={() => setIsErrorModalOpen(false)}
@@ -535,98 +567,97 @@ export default function Employees() {
   );
 }
 
-// Employee Details View Component
 function EmployeeDetailsView({ employee }: { employee: Employee }) {
   return (
-    <div className="space-y-6 max-h-96 overflow-y-auto">
-      {/* Basic Information */}
-      <div className="card">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Basic Information</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <div className="space-y-4 sm:space-y-6 max-h-96 overflow-y-auto">
+      <div className="card p-3 sm:p-4">
+        <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4">Basic Information</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-600">Full Name</label>
-            <p className="text-sm text-gray-900">{employee.name || employee.fullName}</p>
+            <label className="block text-xs sm:text-sm font-medium text-gray-600">Full Name</label>
+            <p className="text-sm text-gray-900 break-words">{employee.name || employee.fullName}</p>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-600">Employee ID</label>
-            <p className="text-sm text-gray-900 font-mono">{employee.employeeId || employee.id}</p>
+            <label className="block text-xs sm:text-sm font-medium text-gray-600">Employee ID</label>
+            <p className="text-sm text-gray-900 font-mono break-all">{employee.employeeId || employee.id}</p>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-600">Email</label>
-            <p className="text-sm text-gray-900">{employee.email}</p>
+            <label className="block text-xs sm:text-sm font-medium text-gray-600">Email</label>
+            <p className="text-sm text-gray-900 break-all">{employee.email}</p>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-600">Mobile</label>
+            <label className="block text-xs sm:text-sm font-medium text-gray-600">Mobile</label>
             <p className="text-sm text-gray-900">{employee.mobile || employee.phone}</p>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-600">Date of Birth</label>
+            <label className="block text-xs sm:text-sm font-medium text-gray-600">Date of Birth</label>
             <p className="text-sm text-gray-900">{employee.dob ? formatDate(employee.dob) : 'N/A'}</p>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-600">Date of Joining</label>
+            <label className="block text-xs sm:text-sm font-medium text-gray-600">Date of Joining</label>
             <p className="text-sm text-gray-900">{employee.doj ? formatDate(employee.doj) : 'N/A'}</p>
           </div>
         </div>
       </div>
 
-      {/* Government Documents */}
-      <div className="card">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Government Documents</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="card p-3 sm:p-4">
+        <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4">Government Documents</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-600">Aadhar Number</label>
-            <p className="text-sm text-gray-900 font-mono">{employee.aadhar || 'Not provided'}</p>
+            <label className="block text-xs sm:text-sm font-medium text-gray-600">Aadhar Number</label>
+            <p className="text-sm text-gray-900 font-mono break-all">{employee.aadhar || 'Not provided'}</p>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-600">PAN Number</label>
-            <p className="text-sm text-gray-900 font-mono">{employee.pan || 'Not provided'}</p>
+            <label className="block text-xs sm:text-sm font-medium text-gray-600">PAN Number</label>
+            <p className="text-sm text-gray-900 font-mono break-all">{employee.pan || 'Not provided'}</p>
           </div>
         </div>
       </div>
 
-      {/* Bank Details */}
-      <div className="card">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Bank Information</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="card p-3 sm:p-4">
+        <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4">Bank Information</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-600">Account Number</label>
-            <p className="text-sm text-gray-900 font-mono">{employee.accountNo || 'Not provided'}</p>
+            <label className="block text-xs sm:text-sm font-medium text-gray-600">Account Number</label>
+            <p className="text-sm text-gray-900 font-mono break-all">{employee.accountNo || 'Not provided'}</p>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-600">IFSC Code</label>
+            <label className="block text-xs sm:text-sm font-medium text-gray-600">IFSC Code</label>
             <p className="text-sm text-gray-900 font-mono">{employee.ifsc || 'Not provided'}</p>
           </div>
         </div>
       </div>
 
-      {/* Salary Information */}
-      <div className="card">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Salary Information</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="card p-3 sm:p-4">
+        <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4">Job Description</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-600">Salary</label>
-            <p className="text-lg font-bold text-green-600">
+            <label className="block text-xs sm:text-sm font-medium text-gray-600">Department</label>
+            <p className="text-sm text-gray-900">{employee.department || 'Not assigned'}</p>
+          </div>
+          <div>
+            <label className="block text-xs sm:text-sm font-medium text-gray-600">Monthly Salary</label>
+            <p className="text-sm text-green-600 font-bold">
               {employee.salary ? formatCurrency(employee.salary) : 'Not set'}
             </p>
           </div>
         </div>
       </div>
 
-      {/* System Information */}
+
       {(employee.createdAt || employee.updatedAt) && (
-        <div className="card">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">System Information</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="card p-3 sm:p-4">
+          <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4">System Information</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
             {employee.createdAt && (
               <div>
-                <label className="block text-sm font-medium text-gray-600">Created On</label>
+                <label className="block text-xs sm:text-sm font-medium text-gray-600">Created On</label>
                 <p className="text-sm text-gray-900">{formatDate(employee.createdAt)}</p>
               </div>
             )}
             {employee.updatedAt && (
               <div>
-                <label className="block text-sm font-medium text-gray-600">Last Updated</label>
+                <label className="block text-xs sm:text-sm font-medium text-gray-600">Last Updated</label>
                 <p className="text-sm text-gray-900">{formatDate(employee.updatedAt)}</p>
               </div>
             )}
