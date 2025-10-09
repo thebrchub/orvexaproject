@@ -13,6 +13,7 @@ import Employees from "./pages/employees";
 import Attendance from "./pages/attendance";
 import Payroll from "./pages/payroll";
 import Login from "./pages/login";
+import CompanySettings from "./pages/companysettings";
 import SupportStaff from "./pages/support/SupportCompanyDemoPage"; // ✅ Our new support page
 
 // ✅ Sidebar Component
@@ -27,6 +28,7 @@ function Sidebar() {
     { path: "/employees", label: "Employees", icon: "👥" },
     { path: "/attendance", label: "Attendance", icon: "📋" },
     { path: "/payroll", label: "Payroll", icon: "💰" },
+    { path: "/company-settings", label: "Company Settings", icon: "🏢" }, // ✅ New option
   ];
 
   const handleLogout = () => {
@@ -120,6 +122,7 @@ function Layout() {
             <Route path="/employees" element={<Employees />} />
             <Route path="/attendance" element={<Attendance />} />
             <Route path="/payroll" element={<Payroll />} />
+            <Route path="/company-settings" element={<CompanySettings />} /> {/* ✅ New route */}
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
         </main>
