@@ -1,10 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { api, parseApiError } from '../lib/api';
 import type { AddEmployeeRequest } from '../lib/api';
 import TableColumn, { StatusBadge, ActionButton } from '../components/Table';
 import ModalProps, { ConfirmModal, SuccessModal } from '../components/Modal';
 import EmployeeFormProps from '../components/EmployeeForm';
-import type { AddEmployeeResponse } from '../lib/api';
 import { formatDate, formatCurrency } from '../utils/timeUtils';
 
 interface Employee {
@@ -41,10 +40,10 @@ interface EmployeeResponse {
   dob: string;
   details: {
     salary: number;
-    aadhar: string;
-    pan: string;
-    accountNo: number;
-    ifsc: string;
+    aadhar?: string;      
+    pan?: string;         
+    accountNo?: number;   
+    ifsc?: string;        
   };
   position?: string;
   department?: string;
@@ -92,7 +91,7 @@ export default function Employees() {
           name: emp.name || 'N/A',
           fullName: emp.name || 'N/A',
           email: emp.email || 'N/A',
-          mobile: emp.mobile || 'N/A',
+          mobile: emp.mobile || '',
           doj: emp.doj || '',
           dob: emp.dob || '',
           salary: details.salary || 0,
@@ -107,10 +106,11 @@ export default function Employees() {
         };
       });
 
+      console.log('Loaded employees:', mappedEmployees); // Debug
       setEmployees(mappedEmployees);
     } catch (error: any) {
       console.error('Failed to load employees:', error);
-      setErrorMessage(parseApiError(error));  // ✅ Use parseApiError
+      setErrorMessage(parseApiError(error));
       setIsErrorModalOpen(true);
     } finally {
       setLoading(false);
@@ -145,7 +145,6 @@ export default function Employees() {
   });
 
   const departments = [...new Set(employees.map(emp => emp.department).filter(Boolean))];
-  const statuses = [...new Set(employees.map(emp => emp.status).filter(Boolean))];
 
   const stats = {
     total: employees.length,
@@ -155,44 +154,116 @@ export default function Employees() {
     remoteWorkers: employees.filter(emp => emp.workLocation === 'remote').length,
   };
 
-  const handleCreateEmployee = async (formData: any) => {
+  // ✅ FIXED: Create Employee - Don't send ID
+  // Replace the handleCreateEmployee function in Employees.tsx with this:
+
+const handleCreateEmployee = async (formData: any) => {
+  try {
+    setFormLoading(true);
+    console.log('CREATE - Form Data Received:', JSON.stringify(formData, null, 2));
+    
+    if (!formData.email || !formData.name) {
+      throw new Error('Email and name are required');
+    }
+
+    if (!formData.id) {
+      throw new Error('Employee ID is required');
+    }
+
+    // ✅ KEEP the ID - backend requires it!
+    const employeeData: AddEmployeeRequest = {
+      id: parseInt(formData.id.toString()), // Ensure it's a number
+      email: formData.email.trim().toLowerCase(),
+      mobile: formData.mobile.trim().replace(/\s/g, ''),
+      name: formData.name.trim(),
+      doj: formData.doj,
+      dob: formData.dob,
+      department: formData.department.trim(),
+      details: {
+        salary: parseFloat(formData.details?.salary?.toString() || formData.salary?.toString() || '0'),
+        aadhar: formData.details?.aadhar || formData.aadhar || '',
+        pan: formData.details?.pan || formData.pan || '',
+        accountNo: parseInt(formData.details?.accountNo?.toString() || formData.accountNo?.toString() || '0'),
+        ifsc: formData.details?.ifsc || formData.ifsc || '',
+      }
+    };
+    
+    console.log('CREATE - Prepared Employee Data:', JSON.stringify(employeeData, null, 2));
+    await loadEmployees();
+
+    setIsAddModalOpen(false);
+    setSuccessMessage(`Employee ${employeeData.name} added successfully!`);
+    setIsSuccessModalOpen(true);
+  } catch (error: any) {
+    console.error('Failed to create employee:', error);
+    setErrorMessage(parseApiError(error));
+    setIsErrorModalOpen(true);
+  } finally {
+    setFormLoading(false);
+  }
+};
+
+  // ✅ CONNECTED: Update Employee
+  const handleUpdateEmployee = async (formData: any) => {
+    if (!selectedEmployee) return;
+    
     try {
       setFormLoading(true);
-      console.log('Form Data Received:', JSON.stringify(formData, null, 2));
+      console.log('UPDATE - Selected Employee:', selectedEmployee); // Debug
+      console.log('UPDATE - Form Data:', formData);
       
       if (!formData.email || !formData.name) {
         throw new Error('Email and name are required');
       }
 
+      // ✅ MUST include ID for update - backend requires it
       const employeeData: AddEmployeeRequest = {
         ...formData,
-        id: Date.now(),
+        id: parseInt(selectedEmployee.id) || parseInt(selectedEmployee.employeeId),
       };
 
-      console.log('Prepared Employee Data:', JSON.stringify(employeeData, null, 2));
-      const responseFromApi = await api.addEmployee(employeeData);
+      console.log('UPDATE - Sending data:', employeeData); // Debug
+
+      await api.updateEmployee(selectedEmployee.email, employeeData);
       await loadEmployees();
 
-      setIsAddModalOpen(false);
-      setSuccessMessage(`Employee ${employeeData.name} added successfully!`);
+      setIsEditModalOpen(false);
+      setSelectedEmployee(null);
+      setSuccessMessage(`Employee ${employeeData.name} updated successfully!`);
       setIsSuccessModalOpen(true);
     } catch (error: any) {
-      console.error('Failed to create employee:', error);
-      setErrorMessage(parseApiError(error));  // ✅ Use parseApiError
+      console.error('Failed to update employee:', error);
+      setErrorMessage(parseApiError(error));
       setIsErrorModalOpen(true);
     } finally {
       setFormLoading(false);
     }
   };
 
-  const handleUpdateEmployee = async (formData: any) => {
-    setErrorMessage('Update employee API is not yet implemented.');
-    setIsErrorModalOpen(true);
-  };
-
+  // ✅ CONNECTED: Delete Employee
   const handleDeleteEmployee = async () => {
-    setErrorMessage('Delete employee API is not yet implemented.');
-    setIsErrorModalOpen(true);
+    if (!selectedEmployee) return;
+    
+    try {
+      setDeleteLoading(true);
+      console.log('Deleting employee:', selectedEmployee.email);
+      
+      // Delete employee using email as ID
+      await api.deleteEmployee(selectedEmployee.email);
+      await loadEmployees();
+
+      setIsDeleteModalOpen(false);
+      setSelectedEmployee(null);
+      setSuccessMessage(`Employee ${selectedEmployee.name} deleted successfully!`);
+      setIsSuccessModalOpen(true);
+    } catch (error: any) {
+      console.error('Failed to delete employee:', error);
+      setErrorMessage(parseApiError(error));
+      setIsErrorModalOpen(true);
+      setIsDeleteModalOpen(false); // Close delete modal on error
+    } finally {
+      setDeleteLoading(false);
+    }
   };
 
   const columns = [
@@ -643,7 +714,6 @@ function EmployeeDetailsView({ employee }: { employee: Employee }) {
           </div>
         </div>
       </div>
-
 
       {(employee.createdAt || employee.updatedAt) && (
         <div className="card p-3 sm:p-4">

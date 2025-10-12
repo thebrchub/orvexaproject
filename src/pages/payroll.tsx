@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { api, formatCurrency, parseApiError } from '../lib/api';
 import type { PayrollRecord, Employee,  } from '../lib/api';
 import Table, { StatusBadge, ActionButton } from '../components/Table';

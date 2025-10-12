@@ -1,10 +1,43 @@
-import React, { useState, useEffect } from 'react';
-import { api,  formatCurrency } from '../lib/api';
-import type { DashboardStats, } from '../lib/api';
+import { useState, useEffect } from 'react';
+import { api, parseApiError } from '../lib/api';
+import type { EmployeeResponse, AttendanceRecord, PayrollRecord } from '../lib/api';
 
+const formatCurrency = (amount: number): string => {
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: 0,
+  }).format(amount);
+};
+
+const getRelativeTime = (dateString: string | number | undefined): string => {
+  if (!dateString) return 'Recently';
+  
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  const diffDays = Math.floor(diffHours / 24);
+  
+  if (diffHours < 1) return 'Just now';
+  if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+  if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+  return date.toLocaleDateString();
+};
+
+interface Activity {
+  action: string;
+  person: string;
+  time: string;
+  icon: string;
+  color: string;
+  bgColor: string;
+}
 
 export default function Dashboard() {
-  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [employees, setEmployees] = useState<EmployeeResponse[]>([]);
+  const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
+  const [payrollRecords, setPayrollRecords] = useState<PayrollRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -15,32 +48,52 @@ export default function Dashboard() {
   const loadDashboardData = async () => {
     try {
       setLoading(true);
-      const data = await api.getDashboardStats();
-      setStats(data);
-    } catch (err) {
-      setError('Failed to load dashboard data');
+      setError(null);
+      
+      const today = new Date().toISOString().split('T')[0];
+      
+      // Fetch data using the same API calls as other pages
+      const [employeesData, attendanceData, payrollData] = await Promise.all([
+        api.getAllEmployees(),
+        api.getAttendance(today),
+        api.getPayrollRecords()
+      ]);
+      
+      console.log('Dashboard Data Loaded:');
+      console.log('Employees:', employeesData);
+      console.log('Attendance:', attendanceData);
+      console.log('Payroll:', payrollData);
+      
+      setEmployees(employeesData);
+      setAttendanceRecords(attendanceData);
+      setPayrollRecords(payrollData);
+    } catch (err: any) {
+      const errorMsg = parseApiError(err);
+      setError(errorMsg);
       console.error('Dashboard error:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  if (loading) {
-    return <DashboardSkeleton />;
-  }
-
-  if (error || !stats) {
-    return (
-      <div className="card text-center py-12">
-        <div className="text-red-400 text-6xl mb-4">⚠️</div>
-        <h3 className="text-lg font-medium text-gray-900 mb-2">Error Loading Dashboard</h3>
-        <p className="text-gray-500 mb-4">{error || 'Something went wrong'}</p>
-        <button onClick={loadDashboardData} className="btn-primary">
-          Try Again
-        </button>
-      </div>
-    );
-  }
+  // Calculate stats from real data
+  const stats = {
+    totalEmployees: employees.length,
+    presentToday: attendanceRecords.filter(record => 
+      record.status === 'checked-in' || record.status === 'checked-out'
+    ).length,
+    absentToday: attendanceRecords.filter(record => record.status === 'not-marked').length,
+    lateToday: attendanceRecords.filter(record => 
+      record.status === 'check-in-requested'
+    ).length,
+    totalSalaryThisMonth: employees.reduce((sum, emp) => {
+      const salary = emp.details?.salary || 0;
+      return sum + salary;
+    }, 0),
+    pendingPayrolls: payrollRecords.filter(record => 
+      record.status === 'draft' || record.status === 'processed'
+    ).length,
+  };
 
   const attendanceRate = stats.totalEmployees > 0 
     ? Math.round((stats.presentToday / stats.totalEmployees) * 100) 
@@ -51,61 +104,144 @@ export default function Dashboard() {
       title: 'Total Employees',
       value: stats.totalEmployees.toString(),
       icon: '👥',
-      color: 'bg-blue-500',
-      bgColor: 'bg-blue-50',
       textColor: 'text-blue-600',
+      iconBg: 'bg-blue-100',
     },
     {
       title: 'Present Today',
       value: stats.presentToday.toString(),
       icon: '✅',
-      color: 'bg-green-500',
-      bgColor: 'bg-green-50',
       textColor: 'text-green-600',
+      iconBg: 'bg-green-100',
     },
     {
       title: 'Absent Today',
       value: stats.absentToday.toString(),
       icon: '❌',
-      color: 'bg-red-500',
-      bgColor: 'bg-red-50',
       textColor: 'text-red-600',
+      iconBg: 'bg-red-100',
     },
     {
       title: 'Late Arrivals',
       value: stats.lateToday.toString(),
       icon: '⏰',
-      color: 'bg-yellow-500',
-      bgColor: 'bg-yellow-50',
       textColor: 'text-yellow-600',
+      iconBg: 'bg-yellow-100',
     },
   ];
 
+  // Generate activities from real data
+  const generateActivities = (): Activity[] => {
+    const activities: Activity[] = [];
+    
+    // Get recent employees (last 2) - sort by date of joining since createdAt doesn't exist
+    const recentEmployees = [...employees]
+      .sort((a, b) => {
+        const dateA = new Date(a.doj || 0).getTime();
+        const dateB = new Date(b.doj || 0).getTime();
+        return dateB - dateA;
+      })
+      .slice(0, 2);
+    
+    recentEmployees.forEach(emp => {
+      activities.push({
+        action: 'New employee added',
+        person: emp.name || 'Unknown',
+        time: getRelativeTime(emp.doj),
+        icon: '👤',
+        color: 'text-blue-600',
+        bgColor: 'bg-blue-50'
+      });
+    });
+    
+    // Get recent attendance (last 2)
+    const recentAttendance = [...attendanceRecords]
+      .filter(record => record.checkIn)
+      .slice(0, 2);
+    
+    recentAttendance.forEach(record => {
+      activities.push({
+        action: 'Attendance marked',
+        person: record.employeeName || 'Unknown',
+        time: getRelativeTime(record.checkIn || undefined),
+        icon: '✅',
+        color: 'text-green-600',
+        bgColor: 'bg-green-50'
+      });
+    });
+    
+    // Get recent payroll (last 1)
+    const recentPayroll = [...payrollRecords]
+      .sort((a, b) => {
+        const dateA = new Date(a.generatedAt || 0).getTime();
+        const dateB = new Date(b.generatedAt || 0).getTime();
+        return dateB - dateA;
+      })
+      .slice(0, 1);
+    
+    recentPayroll.forEach(record => {
+      activities.push({
+        action: 'Payroll generated',
+        person: record.employeeName || 'Unknown',
+        time: getRelativeTime(record.generatedAt),
+        icon: '💰',
+        color: 'text-purple-600',
+        bgColor: 'bg-purple-50'
+      });
+    });
+    
+    return activities.slice(0, 4);
+  };
+
+  if (loading) {
+    return <DashboardSkeleton />;
+  }
+
+  if (error) {
+    return (
+      <div className="bg-white rounded-2xl shadow-sm p-12 text-center">
+        <div className="text-red-400 text-6xl mb-4">⚠️</div>
+        <h3 className="text-lg font-medium text-gray-900 mb-2">Error Loading Dashboard</h3>
+        <p className="text-gray-500 mb-4">{error}</p>
+        <button 
+          onClick={loadDashboardData}
+          className="px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors font-semibold"
+        >
+          Try Again
+        </button>
+      </div>
+    );
+  }
+
+  const activities = generateActivities();
+
   return (
-    <div className="space-y-6 animate-fade-in">
-      {/* Welcome Header */}
-      <div className=" text-black">
+    <div className="space-y-8 animate-fade-in">
+      <div className="text-black">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl text-black font-bold mb-2">Dashboard Overview</h1>
-            <p className="text-black-100">
+            <p className="text-gray-600">
               Welcome back! Here's what's happening with your team today.
             </p>
           </div>
-          {/* <div className="text-6xl opacity-20">📊</div> */}
+          <button 
+            onClick={loadDashboardData}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center text-sm"
+          >
+            <span className="mr-2">🔄</span>
+            Refresh
+          </button>
         </div>
       </div>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
         {statCards.map((card, index) => (
           <StatCard key={index} {...card} />
         ))}
       </div>
 
-      {/* Main Content Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Attendance Overview */}
         <div className="lg:col-span-2">
           <AttendanceOverview 
             attendanceRate={attendanceRate}
@@ -115,7 +251,6 @@ export default function Dashboard() {
           />
         </div>
 
-        {/* Quick Actions */}
         <div className="space-y-6">
           <QuickActions />
           <PayrollSummary 
@@ -125,112 +260,115 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Recent Activity */}
-      <RecentActivity />
+      <RecentActivity activities={activities} />
     </div>
   );
 }
 
-// Stat Card Component
-function StatCard({ title, value, icon, color, bgColor, textColor }: {
+interface StatCardProps {
   title: string;
   value: string;
   icon: string;
-  color: string;
-  bgColor: string;
+  iconBg: string;
   textColor: string;
-}) {
+}
+
+function StatCard({ title, value, icon, iconBg, textColor }: StatCardProps) {
   return (
-    <div className="card hover:shadow-lg transition-shadow duration-300">
-      <div className="flex items-center">
-        <div className={`p-3 rounded-full ${bgColor} mr-4`}>
-          <span className="text-2xl">{icon}</span>
+    <div className="bg-white rounded-2xl shadow-sm hover:shadow-lg transition-all duration-300 p-6 border border-gray-100">
+      <div className="flex items-center justify-between">
+        <div className="flex-1">
+          <p className="text-sm font-medium text-gray-600 mb-1">{title}</p>
+          <p className={`text-3xl font-bold ${textColor}`}>{value}</p>
         </div>
-        <div>
-          <p className="text-sm font-medium text-gray-600">{title}</p>
-          <p className={`text-2xl font-bold ${textColor}`}>{value}</p>
+        <div className={`w-14 h-14 ${iconBg} rounded-xl flex items-center justify-center`}>
+          <span className="text-3xl">{icon}</span>
         </div>
       </div>
     </div>
   );
 }
 
-// Attendance Overview Component
-function AttendanceOverview({ attendanceRate, present, absent, late }: {
+interface AttendanceOverviewProps {
   attendanceRate: number;
   present: number;
   absent: number;
   late: number;
-}) {
+}
+
+function AttendanceOverview({ attendanceRate, present, absent, late }: AttendanceOverviewProps) {
   return (
-    <div className="card">
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-xl font-semibold text-gray-900">Today's Attendance</h2>
-        <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-          attendanceRate >= 90 ? 'bg-green-100 text-green-800' :
-          attendanceRate >= 70 ? 'bg-yellow-100 text-yellow-800' :
-          'bg-red-100 text-red-800'
+    <div className="bg-white rounded-2xl shadow-sm p-8 border border-gray-100">
+      <div className="flex items-center justify-between mb-8">
+        <h2 className="text-xl font-bold text-gray-900 flex items-center">
+          <span className="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center mr-3 text-white text-xl">📊</span>
+          Today's Attendance
+        </h2>
+        <span className={`px-4 py-2 rounded-xl text-sm font-bold ${
+          attendanceRate >= 90 ? 'bg-green-100 text-green-700' :
+          attendanceRate >= 70 ? 'bg-yellow-100 text-yellow-700' :
+          'bg-red-100 text-red-700'
         }`}>
           {attendanceRate}% Present
         </span>
       </div>
 
-      {/* Progress Bar */}
-      <div className="mb-6">
-        <div className="flex justify-between text-sm text-gray-600 mb-2">
+      <div className="mb-8">
+        <div className="flex justify-between text-sm font-semibold text-gray-700 mb-3">
           <span>Attendance Rate</span>
           <span>{attendanceRate}%</span>
         </div>
-        <div className="w-full bg-gray-200 rounded-full h-3">
+        <div className="w-full bg-gray-100 rounded-full h-4 overflow-hidden">
           <div 
-            className={`h-3 rounded-full transition-all duration-300 ${
-              attendanceRate >= 90 ? 'bg-green-500' :
-              attendanceRate >= 70 ? 'bg-yellow-500' :
-              'bg-red-500'
+            className={`h-4 rounded-full transition-all duration-500 ${
+              attendanceRate >= 90 ? 'bg-gradient-to-r from-green-500 to-green-600' :
+              attendanceRate >= 70 ? 'bg-gradient-to-r from-yellow-500 to-yellow-600' :
+              'bg-gradient-to-r from-red-500 to-red-600'
             }`}
             style={{ width: `${attendanceRate}%` }}
           ></div>
         </div>
       </div>
 
-      {/* Attendance Breakdown */}
       <div className="grid grid-cols-3 gap-4">
-        <div className="text-center p-4 bg-green-50 rounded-lg">
-          <div className="text-2xl font-bold text-green-600">{present}</div>
-          <div className="text-sm text-green-800">Present</div>
+        <div className="text-center p-5 bg-gradient-to-br from-green-50 to-green-100 rounded-xl border border-green-200">
+          <div className="text-3xl font-bold text-green-700 mb-1">{present}</div>
+          <div className="text-sm font-semibold text-green-800">Present</div>
         </div>
-        <div className="text-center p-4 bg-red-50 rounded-lg">
-          <div className="text-2xl font-bold text-red-600">{absent}</div>
-          <div className="text-sm text-red-800">Absent</div>
+        <div className="text-center p-5 bg-gradient-to-br from-red-50 to-red-100 rounded-xl border border-red-200">
+          <div className="text-3xl font-bold text-red-700 mb-1">{absent}</div>
+          <div className="text-sm font-semibold text-red-800">Absent</div>
         </div>
-        <div className="text-center p-4 bg-yellow-50 rounded-lg">
-          <div className="text-2xl font-bold text-yellow-600">{late}</div>
-          <div className="text-sm text-yellow-800">Late</div>
+        <div className="text-center p-5 bg-gradient-to-br from-yellow-50 to-yellow-100 rounded-xl border border-yellow-200">
+          <div className="text-3xl font-bold text-yellow-700 mb-1">{late}</div>
+          <div className="text-sm font-semibold text-yellow-800">Late</div>
         </div>
       </div>
     </div>
   );
 }
 
-// Quick Actions Component
 function QuickActions() {
   const actions = [
-    { label: 'Add Employee', icon: '➕', href: '/employees', color: 'bg-blue-600 hover:bg-blue-700' },
-    { label: 'Mark Attendance', icon: '📋', href: '/attendance', color: 'bg-green-600 hover:bg-green-700' },
-    { label: 'Generate Payroll', icon: '💰', href: '/payroll', color: 'bg-purple-600 hover:bg-purple-700' },
+    { label: 'Add Employee', icon: '➕', href: '/employees', color: 'from-blue-500 to-blue-600', hoverColor: 'hover:from-blue-600 hover:to-blue-700' },
+    { label: 'Mark Attendance', icon: '📋', href: '/attendance', color: 'from-green-500 to-green-600', hoverColor: 'hover:from-green-600 hover:to-green-700' },
+    { label: 'Generate Payroll', icon: '💰', href: '/payroll', color: 'from-purple-500 to-purple-600', hoverColor: 'hover:from-purple-600 hover:to-purple-700' },
   ];
 
   return (
-    <div className="card">
-      <h2 className="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h2>
+    <div className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
+      <h2 className="text-lg font-bold text-gray-900 mb-5 flex items-center">
+        <span className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-lg flex items-center justify-center mr-3 text-white">⚡</span>
+        Quick Actions
+      </h2>
       <div className="space-y-3">
         {actions.map((action, index) => (
           <a
             key={index}
             href={action.href}
-            className={`block w-full text-center py-3 px-4 rounded-lg text-white font-medium transition-colors duration-200 ${action.color}`}
+            className={`block w-full text-center py-4 px-4 rounded-xl text-white font-bold transition-all duration-200 bg-gradient-to-r ${action.color} ${action.hoverColor} shadow-lg hover:shadow-xl transform hover:-translate-y-0.5`}
           >
-            <span className="mr-2">{action.icon}</span>
+            <span className="text-xl mr-2">{action.icon}</span>
             {action.label}
           </a>
         ))}
@@ -239,106 +377,115 @@ function QuickActions() {
   );
 }
 
-// Payroll Summary Component
-function PayrollSummary({ totalSalary, pendingPayrolls }: {
+interface PayrollSummaryProps {
   totalSalary: number;
   pendingPayrolls: number;
-}) {
+}
+
+function PayrollSummary({ totalSalary, pendingPayrolls }: PayrollSummaryProps) {
   return (
-    <div className="card">
-      <h2 className="text-lg font-semibold text-gray-900 mb-4">Payroll Summary</h2>
-      <div className="space-y-4">
-        <div>
-          <p className="text-sm text-gray-600">Total Monthly Salary</p>
-          <p className="text-2xl font-bold text-gray-900">{formatCurrency(totalSalary)}</p>
+    <div className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
+      <h2 className="text-lg font-bold text-gray-900 mb-5 flex items-center">
+        <span className="w-8 h-8 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-lg flex items-center justify-center mr-3 text-white">💼</span>
+        Payroll Summary
+      </h2>
+      <div className="space-y-5">
+        <div className="p-5 bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl border border-blue-200">
+          <p className="text-sm font-semibold text-blue-800 mb-2">Total Monthly Salary</p>
+          <p className="text-2xl font-bold text-blue-900">{formatCurrency(totalSalary)}</p>
         </div>
-        <div className="flex items-center justify-between p-3 bg-orange-50 rounded-lg">
+        <div className="flex items-center justify-between p-5 bg-gradient-to-br from-orange-50 to-orange-100 rounded-xl border border-orange-200">
           <div>
-            <p className="text-sm font-medium text-orange-800">Pending Payrolls</p>
-            <p className="text-lg font-bold text-orange-600">{pendingPayrolls}</p>
+            <p className="text-sm font-semibold text-orange-800 mb-1">Pending Payrolls</p>
+            <p className="text-2xl font-bold text-orange-700">{pendingPayrolls}</p>
           </div>
-          <span className="text-2xl">⏳</span>
+          <span className="text-4xl">⏳</span>
         </div>
       </div>
     </div>
   );
 }
 
-// Recent Activity Component
-function RecentActivity() {
-  const activities = [
-    { action: 'New employee added', person: 'John Doe', time: '2 hours ago', icon: '👤', color: 'text-blue-600' },
-    { action: 'Payroll generated', person: 'HR Department', time: '4 hours ago', icon: '💰', color: 'text-green-600' },
-    { action: 'Attendance marked', person: 'Jane Smith', time: '6 hours ago', icon: '✅', color: 'text-purple-600' },
-    { action: 'Employee updated', person: 'Mike Johnson', time: '1 day ago', icon: '✏️', color: 'text-orange-600' },
-  ];
+interface RecentActivityProps {
+  activities: Activity[];
+}
 
+function RecentActivity({ activities }: RecentActivityProps) {
   return (
-    <div className="card">
+    <div className="bg-white rounded-2xl shadow-sm p-8 border border-gray-100">
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-xl font-semibold text-gray-900">Recent Activity</h2>
-        <button className="text-blue-600 hover:text-blue-700 text-sm font-medium">
-          View All
+        <h2 className="text-xl font-bold text-gray-900 flex items-center">
+          <span className="w-10 h-10 bg-gradient-to-br from-violet-500 to-violet-600 rounded-xl flex items-center justify-center mr-3 text-white text-xl">📝</span>
+          Recent Activity
+        </h2>
+        <button className="text-blue-600 hover:text-blue-700 text-sm font-bold hover:underline transition-all">
+          View All →
         </button>
       </div>
       
-      <div className="space-y-4">
-        {activities.map((activity, index) => (
-          <div key={index} className="flex items-center space-x-4 p-3 hover:bg-gray-50 rounded-lg transition-colors duration-200">
-            <span className={`text-xl ${activity.color}`}>{activity.icon}</span>
-            <div className="flex-1">
-              <p className="text-sm font-medium text-gray-900">{activity.action}</p>
-              <p className="text-xs text-gray-500">{activity.person} • {activity.time}</p>
+      {activities.length === 0 ? (
+        <div className="text-center py-8 text-gray-500">
+          <p>No recent activity</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {activities.map((activity, index) => (
+            <div key={index} className="flex items-center space-x-4 p-4 hover:bg-gray-50 rounded-xl transition-all duration-200 border border-transparent hover:border-gray-200">
+              <div className={`w-12 h-12 ${activity.bgColor} rounded-xl flex items-center justify-center flex-shrink-0`}>
+                <span className="text-2xl">{activity.icon}</span>
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-gray-900">{activity.action}</p>
+                <p className="text-xs text-gray-500 mt-0.5">{activity.person} • {activity.time}</p>
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-// Loading Skeleton
 function DashboardSkeleton() {
   return (
-    <div className="space-y-6">
-      {/* Header Skeleton */}
-      <div className="card">
+    <div className="space-y-8 animate-fade-in">
+      <div className="bg-white rounded-2xl shadow-sm p-6">
         <div className="animate-pulse">
-          <div className="h-6 bg-gray-200 rounded w-1/3 mb-2"></div>
-          <div className="h-4 bg-gray-200 rounded w-1/2"></div>
+          <div className="h-6 bg-gray-200 rounded-lg w-1/3 mb-2"></div>
+          <div className="h-4 bg-gray-200 rounded-lg w-1/2"></div>
         </div>
       </div>
 
-      {/* Stats Grid Skeleton */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
         {[...Array(4)].map((_, i) => (
-          <div key={i} className="card">
-            <div className="animate-pulse flex items-center">
-              <div className="w-12 h-12 bg-gray-200 rounded-full mr-4"></div>
-              <div>
+          <div key={i} className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
+            <div className="animate-pulse flex items-center justify-between">
+              <div className="flex-1">
                 <div className="h-4 bg-gray-200 rounded w-20 mb-2"></div>
-                <div className="h-6 bg-gray-200 rounded w-16"></div>
+                <div className="h-8 bg-gray-200 rounded w-16"></div>
               </div>
+              <div className="w-14 h-14 bg-gray-200 rounded-xl"></div>
             </div>
           </div>
         ))}
       </div>
 
-      {/* Content Skeleton */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 card">
+        <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm p-8 border border-gray-100">
           <div className="animate-pulse">
-            <div className="h-6 bg-gray-200 rounded w-1/3 mb-4"></div>
-            <div className="h-32 bg-gray-200 rounded"></div>
+            <div className="h-6 bg-gray-200 rounded-lg w-1/3 mb-6"></div>
+            <div className="h-32 bg-gray-200 rounded-lg"></div>
           </div>
         </div>
-        <div className="card">
-          <div className="animate-pulse">
-            <div className="h-6 bg-gray-200 rounded w-1/2 mb-4"></div>
-            <div className="space-y-3">
-              <div className="h-12 bg-gray-200 rounded"></div>
-              <div className="h-12 bg-gray-200 rounded"></div>
-              <div className="h-12 bg-gray-200 rounded"></div>
+        <div className="space-y-6">
+          <div className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
+            <div className="animate-pulse">
+              <div className="h-6 bg-gray-200 rounded-lg w-1/2 mb-4"></div>
+              <div className="space-y-3">
+                <div className="h-12 bg-gray-200 rounded-xl"></div>
+                <div className="h-12 bg-gray-200 rounded-xl"></div>
+                <div className="h-12 bg-gray-200 rounded-xl"></div>
+              </div>
             </div>
           </div>
         </div>

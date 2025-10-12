@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { api, parseApiError } from '../lib/api';
-import Table, { StatusBadge, ActionButton } from '../components/Table';
-import Modal, { SuccessModal, ConfirmModal } from '../components/Modal';
+import type { AttendanceResponse } from '../lib/api';
+import Table, { StatusBadge } from '../components/Table';
+import Modal, {  ConfirmModal, SuccessModal, } from '../components/Modal';
 import DatePicker from '../components/DatePicker';
-import { formatDate, formatTime, formatCurrency } from '../utils/timeUtils';
-
+import { formatTime, } from '../utils/timeUtils';
 
 // Types matching backend structure
 interface AttendanceRecord {
@@ -15,7 +15,7 @@ interface AttendanceRecord {
   checkIn: string | null;
   checkOut: string | null;
   workingHours: number;
-  status: 'present' | 'absent' | 'late' | 'half-day' | 'not-marked' | 'checked-in' | 'check-in-requested' | 'check-out-requested';
+  status: 'not-marked' | 'check-in-requested' | 'check-in-rejected' | 'checked-in' | 'check-out-requested' | 'checked-out' | 'check-out-rejected';
   notes?: string;
   rawStatus?: string;
 }
@@ -37,6 +37,7 @@ interface ApprovalRequest {
   employeeName: string;
   type: 'check-in' | 'check-out';
   time: string;
+  isLate?: boolean;
 }
 
 export default function Attendance() {
@@ -56,11 +57,44 @@ export default function Attendance() {
   const [showApprovalModal, setShowApprovalModal] = useState(false);
   
   // Modal states
-  const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
-  const [isErrorModalOpen, setIsErrorModalOpen] = useState(false);
-  const [successMessage, setSuccessMessage] = useState('');
-  const [errorMessage, setErrorMessage] = useState('');
+  const [_isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
+  const [_isErrorModalOpen, setIsErrorModalOpen] = useState(false);
+  const [isManualCheckInModalOpen, setIsManualCheckInModalOpen] = useState(false);
+  const [isManualCheckOutModalOpen, setIsManualCheckOutModalOpen] = useState(false);
+  const [selectedEmployee, setSelectedEmployee] = useState<{ id: string; name: string } | null>(null);
+  const [_successMessage, setSuccessMessage] = useState('');
+  const [_errorMessage, setErrorMessage] = useState('');
   const [approvingLoading, setApprovingLoading] = useState(false);
+
+  // Company settings for late check-in calculation
+  const [companySettings, setCompanySettings] = useState<any>(null);
+
+  // Load company settings
+  useEffect(() => {
+    loadCompanySettings();
+  }, []);
+
+  const loadCompanySettings = async () => {
+    try {
+      const settings = await api.getCompanyDetails();
+      setCompanySettings(settings);
+    } catch (error) {
+      console.error('Failed to load company settings:', error);
+    }
+  };
+
+  // Check if employee is late based on check-in time
+  const isLate = (checkInTime: string | null): boolean => {
+    if (!checkInTime || !companySettings?.lastAllowedCheckInTime) return false;
+    
+    const checkIn = checkInTime.split(':').map(Number);
+    const allowed = companySettings.lastAllowedCheckInTime.split(':').map(Number);
+    
+    const checkInMinutes = checkIn[0] * 60 + checkIn[1];
+    const allowedMinutes = allowed[0] * 60 + allowed[1];
+    
+    return checkInMinutes > allowedMinutes;
+  };
 
   // Auto-refresh every 10 seconds
   useEffect(() => {
@@ -68,7 +102,7 @@ export default function Attendance() {
     
     const interval = setInterval(() => {
       loadData(true); // Silent refresh
-    }, 10000); // 10 seconds
+    }, 10000);
     
     return () => clearInterval(interval);
   }, [autoRefresh, selectedDate]);
@@ -82,7 +116,6 @@ export default function Attendance() {
     try {
       if (!silent) setLoading(true);
       
-      // Fetch employees and attendance data
       const [employeesData, attendanceData] = await Promise.all([
         api.getEmployees(),
         api.getAttendance(selectedDate)
@@ -92,7 +125,6 @@ export default function Attendance() {
       setAttendanceRecords(attendanceData);
       setLastRefresh(new Date());
       
-      // Check for approval requests
       const requests: ApprovalRequest[] = [];
       attendanceData.forEach(record => {
         const employee = employeesData.find(e => e.email === record.employeeId);
@@ -103,7 +135,8 @@ export default function Attendance() {
             employeeId: record.employeeId,
             employeeName: employeeName,
             type: 'check-in',
-            time: record.checkIn || 'Unknown time'
+            time: record.checkIn || 'Unknown time',
+            isLate: isLate(record.checkIn)
           });
         } else if (record.status === 'check-out-requested') {
           requests.push({
@@ -115,18 +148,15 @@ export default function Attendance() {
         }
       });
       
-      // Show notification if there are new requests
       if (requests.length > 0 && requests.length > approvalRequests.length) {
-        // Play notification sound (optional)
         try {
           const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBTGH0fPTgjMGHm7A7+OZURE');
-          audio.play().catch(() => {}); // Ignore if audio fails
+          audio.play().catch(() => {});
         } catch (err) {}
       }
       
       setApprovalRequests(requests);
       
-      // Auto-open modal if there are requests
       if (requests.length > 0) {
         setShowApprovalModal(true);
       }
@@ -134,7 +164,7 @@ export default function Attendance() {
     } catch (error: any) {
       console.error('Failed to load attendance data:', error);
       if (!silent) {
-        setErrorMessage(parseApiError(error));  // ✅ Use parseApiError
+        setErrorMessage(parseApiError(error));
         setIsErrorModalOpen(true);
       }
     } finally {
@@ -142,15 +172,20 @@ export default function Attendance() {
     }
   };
 
-  // Calculate stats
   const stats = {
     totalEmployees: employees.length,
     present: attendanceRecords.filter(record => 
-      record.status === 'present' || record.status === 'late' || record.status === 'checked-in'
+      record.status === 'checked-in' || record.status === 'checked-out'
     ).length,
-    absent: attendanceRecords.filter(record => record.status === 'absent').length,
-    late: attendanceRecords.filter(record => record.status === 'late').length,
-    onTime: attendanceRecords.filter(record => record.status === 'present').length,
+    absent: attendanceRecords.filter(record => 
+      record.status === 'check-in-rejected' || record.status === 'check-out-rejected'
+    ).length,
+    late: attendanceRecords.filter(record => 
+      (record.status === 'checked-in' || record.status === 'checked-out') && isLate(record.checkIn)
+    ).length,
+    onTime: attendanceRecords.filter(record => 
+      (record.status === 'checked-in' || record.status === 'checked-out') && !isLate(record.checkIn)
+    ).length,
     pendingApprovals: approvalRequests.length,
   };
 
@@ -158,43 +193,244 @@ export default function Attendance() {
     ? Math.round((stats.present / stats.totalEmployees) * 100) 
     : 0;
 
-  // Handle approving check-in or check-out
-  const handleApprove = async (employeeEmail: string, employeeName: string, type: 'check-in' | 'check-out') => {
+  // ✅ FIXED: Handle approving with proper time handling
+  // ✅ FIXED: Replace your handleApprove function with this version
+
+// REPLACE your handleApprove function with this corrected version:
+
+// ✅ FINAL FIXED VERSION - Replace the handleApprove function only
+
+const handleApprove = async (employeeEmail: string, employeeName: string, type: 'check-in' | 'check-out') => {
+  try {
+    setApprovingLoading(true);
+    
+    console.log('🔍 Fetching latest attendance for:', employeeEmail, 'Date:', selectedDate);
+    
+    // Fetch the latest attendance record from backend
+    const allAttendance = await api.getAttendance(selectedDate);
+    const record = allAttendance.find(r => r.employeeId === employeeEmail);
+    
+    if (!record) {
+      throw new Error('Attendance record not found');
+    }
+    
+    console.log('📋 Current record:', {
+      employeeEmail,
+      status: record.status,
+      checkIn: record.checkIn,
+      checkOut: record.checkOut
+    });
+    
+    // ⚠️ Generate current time if needed
+    const now = new Date();
+    const hours = now.getUTCHours().toString().padStart(2, '0');
+    const minutes = now.getUTCMinutes().toString().padStart(2, '0');
+    const seconds = now.getUTCSeconds().toString().padStart(2, '0');
+    const currentTimeUTC = `${hours}:${minutes}:${seconds}`;
+    
+    let checkInTime: string;
+    let checkOutTime: string | null;
+    
+    if (type === 'check-in') {
+      // For check-in approval: Use existing check-in time or current time
+      checkInTime = record.checkIn || currentTimeUTC;
+      checkOutTime = null; // Clear check-out when approving check-in
+      
+      console.log('✅ Approving check-in:', {
+        checkInTime,
+        checkOutTime,
+        status: 'CHECKED_IN'
+      });
+    } else {
+      // For check-out approval
+      checkInTime = record.checkIn || currentTimeUTC;
+      
+      // ✅ Use the EXISTING check-out time if available, otherwise use current time
+      checkOutTime = record.checkOut || currentTimeUTC;
+      
+      console.log('✅ Approving check-out:', {
+        checkInTime,
+        checkOutTime,
+        status: 'CHECKED_OUT',
+        note: record.checkOut ? 'Using existing check-out time' : 'Using current time as check-out'
+      });
+    }
+    
+    // ✅ Use the UPDATE endpoint (PUT) to save both times and status
+    const updatedAttendance: AttendanceResponse = {
+      details: {
+        employeeEmail: employeeEmail,
+        attendanceDate: selectedDate,
+      },
+      checkIn: checkInTime,
+      checkOut: checkOutTime,
+      attendanceStatus: type === 'check-in' ? 'CHECKED_IN' : 'CHECKED_OUT',
+      otHours: record.workingHours || 0,
+    };
+    
+    console.log('📤 Sending update via PUT endpoint:', updatedAttendance);
+    
+    // Use UPDATE endpoint instead of APPROVE endpoint
+    await api.updateAttendance(employeeEmail, updatedAttendance, selectedDate);
+    
+    // Refresh data
+    await loadData(true);
+    
+    const approvedTime = type === 'check-in' ? checkInTime : checkOutTime;
+    setSuccessMessage(`${type === 'check-in' ? 'Check-in' : 'Check-out'} approved for ${employeeName} at ${formatTime(approvedTime || '')}!`);
+    setIsSuccessModalOpen(true);
+    
+    setApprovalRequests(prev => prev.filter(req => req.employeeId !== employeeEmail));
+    
+    if (approvalRequests.length <= 1) {
+      setShowApprovalModal(false);
+    }
+    
+  } catch (error: any) {
+    console.error('❌ Failed to approve:', error);
+    setErrorMessage(parseApiError(error));
+    setIsErrorModalOpen(true);
+  } finally {
+    setApprovingLoading(false);
+  }
+};
+
+  const handleReject = async (employeeEmail: string, employeeName: string, type: 'check-in' | 'check-out') => {
     try {
       setApprovingLoading(true);
       
-      await api.approveAttendance(employeeEmail);
+      const record = attendanceRecords.find(r => r.employeeId === employeeEmail);
       
+      if (!record) {
+        throw new Error('Attendance record not found');
+      }
+      
+      const updatedAttendance: AttendanceResponse = {
+        details: {
+          employeeEmail: employeeEmail,
+          attendanceDate: selectedDate,
+        },
+        checkIn: record.checkIn,
+        checkOut: record.checkOut,
+        attendanceStatus: type === 'check-in' ? 'CHECK_IN_REJECTED' : 'CHECK_OUT_REJECTED',
+        otHours: record.workingHours || 0,
+      };
+      
+      await api.updateAttendance(employeeEmail, updatedAttendance, selectedDate);
       await loadData(true);
-      setSuccessMessage(`${type === 'check-in' ? 'Check-in' : 'Check-out'} approved for ${employeeName}!`);
+      
+      setSuccessMessage(`${type === 'check-in' ? 'Check-in' : 'Check-out'} rejected for ${employeeName}.`);
       setIsSuccessModalOpen(true);
       
-      // Remove from approval requests
-      setApprovalRequests(prev => 
-        prev.filter(req => req.employeeId !== employeeEmail)
-      );
+      setApprovalRequests(prev => prev.filter(req => req.employeeId !== employeeEmail));
       
-      // Close modal if no more requests
       if (approvalRequests.length <= 1) {
         setShowApprovalModal(false);
       }
       
     } catch (error: any) {
-      console.error('Failed to approve:', error);
-      setErrorMessage(parseApiError(error));  // ✅ Use parseApiError
-      setIsErrorModalOpen(true);
+      console.error('Failed to reject:', error);
+      setErrorMessage(parseApiError(error));
       setIsErrorModalOpen(true);
     } finally {
       setApprovingLoading(false);
     }
   };
 
-  // Get employees who haven't been marked for attendance today
+  const handleManualCheckIn = async () => {
+    if (!selectedEmployee) return;
+    
+    try {
+      setApprovingLoading(true);
+      
+      const record = attendanceRecords.find(r => r.employeeId === selectedEmployee.id);
+      
+      let checkInTime: string;
+      
+      if (record?.checkIn) {
+        checkInTime = record.checkIn;
+      } else {
+        const now = new Date();
+        checkInTime = now.toISOString().split('T')[1].split('.')[0];
+      }
+      
+      const updatedAttendance: AttendanceResponse = {
+        details: {
+          employeeEmail: selectedEmployee.id,
+          attendanceDate: selectedDate,
+        },
+        checkIn: checkInTime,
+        checkOut: record?.checkOut || null,
+        attendanceStatus: 'CHECKED_IN',
+        otHours: record?.workingHours || 0,
+      };
+      
+      await api.updateAttendance(selectedEmployee.id, updatedAttendance, selectedDate);
+      await loadData(true);
+      
+      setIsManualCheckInModalOpen(false);
+      setSelectedEmployee(null);
+      
+      setSuccessMessage(`Manually checked in ${selectedEmployee.name} at ${formatTime(checkInTime)}`);
+      setIsSuccessModalOpen(true);
+    } catch (error: any) {
+      console.error('Failed to manual check-in:', error);
+      setErrorMessage(parseApiError(error));
+      setIsErrorModalOpen(true);
+    } finally {
+      setApprovingLoading(false);
+    }
+  };
+
+  const handleManualCheckOut = async () => {
+    if (!selectedEmployee) return;
+    
+    try {
+      setApprovingLoading(true);
+      
+      const record = attendanceRecords.find(r => r.employeeId === selectedEmployee.id);
+      
+      let checkOutTime: string;
+      
+      if (record?.checkOut) {
+        checkOutTime = record.checkOut;
+      } else {
+        const now = new Date();
+        checkOutTime = now.toISOString().split('T')[1].split('.')[0];
+      }
+      
+      const updatedAttendance: AttendanceResponse = {
+        details: {
+          employeeEmail: selectedEmployee.id,
+          attendanceDate: selectedDate,
+        },
+        checkIn: record?.checkIn || null,
+        checkOut: checkOutTime,
+        attendanceStatus: 'CHECKED_OUT',
+        otHours: record?.workingHours || 0,
+      };
+      
+      await api.updateAttendance(selectedEmployee.id, updatedAttendance, selectedDate);
+      await loadData(true);
+      
+      setIsManualCheckOutModalOpen(false);
+      setSelectedEmployee(null);
+      
+      setSuccessMessage(`Manually checked out ${selectedEmployee.name} at ${formatTime(checkOutTime)}`);
+      setIsSuccessModalOpen(true);
+    } catch (error: any) {
+      console.error('Failed to manual check-out:', error);
+      setErrorMessage(parseApiError(error));
+      setIsErrorModalOpen(true);
+    } finally {
+      setApprovingLoading(false);
+    }
+  };
+
   const unmarkedEmployees = employees.filter(emp => 
     !attendanceRecords.some(record => record.employeeId === emp.email)
   );
 
-  // Table columns for attendance records
   const columns = [
     {
       key: 'employeeName',
@@ -216,35 +452,63 @@ export default function Attendance() {
       key: 'checkIn',
       label: 'Check In',
       width: '15%',
-      render: (value: string | null, row: AttendanceRecord) => (
-        <div>
-          <span className={`${value ? 'text-gray-900' : 'text-gray-400'}`}>
-            {value ? formatTime(value) : 'Not checked in'}
-          </span>
-          {row.status === 'check-in-requested' && (
-            <span className="block text-xs text-orange-600 font-medium mt-1">
-              ⏳ Pending approval
+      render: (value: string | null, row: AttendanceRecord) => {
+        console.log('CheckIn Debug:', { 
+          employeeName: row.employeeName, 
+          checkInValue: value, 
+          status: row.status,
+          rawStatus: row.rawStatus 
+        });
+        
+        return (
+          <div>
+            <span className={`${value ? 'text-gray-900 font-medium' : 'text-gray-400'}`}>
+              {value ? formatTime(value) : 'Not checked in'}
             </span>
-          )}
-        </div>
-      ),
+            {row.status === 'check-in-requested' && (
+              <span className="block text-xs text-orange-600 font-medium mt-1">
+                ⏳ Pending approval
+              </span>
+            )}
+            {value && isLate(value) && (row.status === 'checked-in' || row.status === 'checked-out') && (
+              <span className="block text-xs text-orange-600 font-medium mt-1">
+                ⚠️ Late arrival
+              </span>
+            )}
+          </div>
+        );
+      },
     },
     {
       key: 'checkOut',
       label: 'Check Out',
       width: '15%',
-      render: (value: string | null, row: AttendanceRecord) => (
-        <div>
-          <span className={`${value ? 'text-gray-900' : 'text-gray-400'}`}>
-            {value ? formatTime(value) : 'Not checked out'}
-          </span>
-          {row.status === 'check-out-requested' && (
-            <span className="block text-xs text-orange-600 font-medium mt-1">
-              ⏳ Pending approval
+      render: (value: string | null, row: AttendanceRecord) => {
+        console.log('CheckOut Debug:', { 
+          employeeName: row.employeeName, 
+          checkOutValue: value, 
+          status: row.status,
+          rawStatus: row.rawStatus 
+        });
+        
+        return (
+          <div>
+            <span className={`${value ? 'text-gray-900 font-medium' : 'text-gray-400'}`}>
+              {value ? formatTime(value) : 'Not checked out'}
             </span>
-          )}
-        </div>
-      ),
+            {row.status === 'check-out-requested' && (
+              <span className="block text-xs text-orange-600 font-medium mt-1">
+                ⏳ Pending approval
+              </span>
+            )}
+            {value && row.status === 'checked-out' && (
+              <span className="block text-xs text-green-600 font-medium mt-1">
+                ✓ Completed
+              </span>
+            )}
+          </div>
+        );
+      },
     },
     {
       key: 'workingHours',
@@ -263,54 +527,93 @@ export default function Attendance() {
     {
       key: 'actions',
       label: 'Actions',
-      width: '15%',
-      render: (value: any, row: AttendanceRecord) => (
+      width: '20%',
+      render: (_value: any, row: AttendanceRecord) => (
         <div className="flex items-center space-x-2">
           {row.status === 'check-in-requested' && (
-            <button
-              onClick={() => handleApprove(row.employeeId, row.employeeName, 'check-in')}
-              disabled={approvingLoading}
-              className="px-3 py-1 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
-            >
-              ✓ Approve Check-in
-            </button>
+            <>
+              <button
+                onClick={() => handleApprove(row.employeeId, row.employeeName, 'check-in')}
+                disabled={approvingLoading}
+                className="px-3 py-1 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+              >
+                ✓ Approve
+              </button>
+              <button
+                onClick={() => handleReject(row.employeeId, row.employeeName, 'check-in')}
+                disabled={approvingLoading}
+                className="px-3 py-1 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+              >
+                ✗ Reject
+              </button>
+            </>
           )}
+
           {row.status === 'check-out-requested' && (
+            <>
+              <button
+                onClick={() => handleApprove(row.employeeId, row.employeeName, 'check-out')}
+                disabled={approvingLoading}
+                className="px-3 py-1 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              >
+                ✓ Approve
+              </button>
+              <button
+                onClick={() => handleReject(row.employeeId, row.employeeName, 'check-out')}
+                disabled={approvingLoading}
+                className="px-3 py-1 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+              >
+                ✗ Reject
+              </button>
+            </>
+          )}
+
+          {(row.status === 'check-in-rejected' || row.status === 'not-marked') && (
             <button
-              onClick={() => handleApprove(row.employeeId, row.employeeName, 'check-out')}
+              onClick={() => {
+                setSelectedEmployee({ id: row.employeeId, name: row.employeeName });
+                setIsManualCheckInModalOpen(true);
+              }}
               disabled={approvingLoading}
-              className="px-3 py-1 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+              className="px-3 py-1 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
             >
-              ✓ Approve Check-out
+              📝 Manual Check-In
             </button>
           )}
-          {row.status === 'checked-in' && (
-            <span className="text-sm text-green-600 font-medium">
-              ✓ Checked In
-            </span>
+
+          {row.status === 'check-out-rejected' && (
+            <button
+              onClick={() => {
+                setSelectedEmployee({ id: row.employeeId, name: row.employeeName });
+                setIsManualCheckOutModalOpen(true);
+              }}
+              disabled={approvingLoading}
+              className="px-3 py-1 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+            >
+              📝 Manual Check-Out
+            </button>
           )}
-          {row.status === 'present' && (
-            <span className="text-sm text-gray-500">
-              Completed
-            </span>
+
+          {row.status === 'checked-in' && (
+            <span className="text-sm text-green-600 font-medium">✓ Checked In</span>
+          )}
+
+          {row.status === 'checked-out' && (
+            <span className="text-sm text-gray-500">✓ Completed</span>
           )}
         </div>
       ),
-    },
+    }
   ];
-
-  const isToday = selectedDate === new Date().toISOString().split('T')[0];
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Attendance Management</h1>
           <p className="text-gray-600 mt-1">Track and manage employee attendance</p>
         </div>
         <div className="flex items-center space-x-3">
-          {/* Auto-refresh toggle */}
           <div className="flex items-center space-x-2 px-3 py-2 bg-gray-100 rounded-lg">
             <input
               type="checkbox"
@@ -324,7 +627,6 @@ export default function Attendance() {
             </label>
           </div>
           
-          {/* Manual refresh button */}
           <button 
             onClick={() => loadData()}
             disabled={loading}
@@ -334,7 +636,6 @@ export default function Attendance() {
             {loading ? 'Refreshing...' : 'Refresh'}
           </button>
           
-          {/* Approval requests button */}
           {approvalRequests.length > 0 && (
             <button
               onClick={() => setShowApprovalModal(true)}
@@ -347,14 +648,11 @@ export default function Attendance() {
         </div>
       </div>
 
-      {/* Last refresh time */}
       <div className="text-sm text-gray-500">
         Last updated: {lastRefresh.toLocaleTimeString('en-IN')}
       </div>
 
-      {/* Date Picker and Stats */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-        {/* Date Picker */}
         <div className="card">
           <DatePicker
             value={selectedDate}
@@ -365,7 +663,6 @@ export default function Attendance() {
           />
         </div>
 
-        {/* Stats Cards */}
         <div className="card">
           <div className="flex items-center">
             <div className="p-3 rounded-full bg-blue-50 mr-4">
@@ -415,7 +712,6 @@ export default function Attendance() {
         </div>
       </div>
 
-      {/* Attendance Rate Card */}
       <div className="card">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-semibold text-gray-900">
@@ -432,7 +728,6 @@ export default function Attendance() {
           </span>
         </div>
 
-        {/* Progress Bar */}
         <div className="mb-4">
           <div className="w-full bg-gray-200 rounded-full h-4">
             <div 
@@ -446,7 +741,6 @@ export default function Attendance() {
           </div>
         </div>
 
-        {/* Breakdown */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="text-center p-3 bg-green-50 rounded-lg">
             <div className="text-xl font-bold text-green-600">{stats.onTime}</div>
@@ -467,7 +761,6 @@ export default function Attendance() {
         </div>
       </div>
 
-      {/* Attendance Records Table */}
       <Table
         columns={columns}
         data={attendanceRecords}
@@ -475,7 +768,6 @@ export default function Attendance() {
         emptyMessage={`No attendance records found for ${new Date(selectedDate).toLocaleDateString('en-IN')}`}
       />
 
-      {/* Approval Requests Modal */}
       <Modal
         isOpen={showApprovalModal}
         onClose={() => setShowApprovalModal(false)}
@@ -485,54 +777,66 @@ export default function Attendance() {
         <ApprovalRequestsModal
           requests={approvalRequests}
           onApprove={handleApprove}
+          onReject={handleReject}
           loading={approvingLoading}
           onClose={() => setShowApprovalModal(false)}
         />
       </Modal>
 
-      {/* Success Modal */}
-      <SuccessModal
-        isOpen={isSuccessModalOpen}
-        onClose={() => setIsSuccessModalOpen(false)}
-        title="Success"
-        message={successMessage}
+      <ConfirmModal
+        isOpen={isManualCheckInModalOpen}
+        onClose={() => {
+          setIsManualCheckInModalOpen(false);
+          setSelectedEmployee(null);
+        }}
+        onConfirm={handleManualCheckIn}
+        title="Manual Check-In"
+        message={`Do you want to manually mark ${selectedEmployee?.name} as checked in? This will override any previous rejection and mark them as present.`}
+        confirmText="Confirm Check-In"
+        type="warning"
+        loading={approvingLoading}
       />
 
-      {/* Error Modal */}
       <ConfirmModal
-        isOpen={isErrorModalOpen}
-        onClose={() => setIsErrorModalOpen(false)}
-        onConfirm={() => setIsErrorModalOpen(false)}
-        title="Error"
-        message={errorMessage}
-        confirmText="OK"
-        type="danger"
+        isOpen={isManualCheckOutModalOpen}
+        onClose={() => {
+          setIsManualCheckOutModalOpen(false);
+          setSelectedEmployee(null);
+        }}
+        onConfirm={handleManualCheckOut}
+        title="Manual Check-Out"
+        message={`Do you want to manually mark ${selectedEmployee?.name} as checked out? This will override the rejection and complete their attendance.`}
+        confirmText="Confirm Check-Out"
+        type="warning"
+        loading={approvingLoading}
       />
+
+       {/* ✅ ADD THESE TWO MODALS HERE */}
+    <SuccessModal
+      isOpen={_isSuccessModalOpen}
+      onClose={() => setIsSuccessModalOpen(false)}
+      title="Success"
+      message={_successMessage}
+    />
+
     </div>
   );
 }
 
 // Approval Requests Modal Component
-// Approval Requests Modal Component
 function ApprovalRequestsModal({ 
   requests,
-  onApprove, 
+  onApprove,
+  onReject,
   loading,
   onClose 
 }: {
   requests: ApprovalRequest[];
   onApprove: (employeeId: string, employeeName: string, type: 'check-in' | 'check-out') => Promise<void>;
+  onReject: (employeeId: string, employeeName: string, type: 'check-in' | 'check-out') => Promise<void>;
   loading: boolean;
   onClose: () => void;
 }) {
-  // TODO: Add reject handler when API endpoint is available
-  const handleReject = async (employeeId: string, employeeName: string, type: 'check-in' | 'check-out') => {
-    // TODO: Implement reject API call
-    // await api.rejectAttendance(employeeId);
-    console.log(`Reject ${type} for ${employeeName} (${employeeId})`);
-    alert('Reject functionality will be implemented when API endpoint is available');
-  };
-
   if (requests.length === 0) {
     return (
       <div className="text-center py-8">
@@ -579,6 +883,11 @@ function ApprovalRequestsModal({
                   <div className="text-xs text-gray-500 mt-1">
                     Time: {formatTime(request.time)}
                   </div>
+                  {request.isLate && (
+                    <div className="text-xs text-red-600 font-medium mt-1">
+                      ⚠️ Late arrival - arrived after allowed time
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -608,20 +917,22 @@ function ApprovalRequestsModal({
                   )}
                 </button>
 
-                {/* Reject Button - TODO: Connect to API when available */}
+                {/* Reject Button */}
                 <button
-                  onClick={() => handleReject(request.employeeId, request.employeeName, request.type)}
+                  onClick={() => onReject(request.employeeId, request.employeeName, request.type)}
                   disabled={loading}
                   className="px-4 py-2 rounded-lg font-medium text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
                 >
                   <span className="mr-2">✗</span>
                   Reject
                 </button>
+                
               </div>
             </div>
           </div>
         ))}
       </div>
+      
 
       <div className="flex justify-end pt-4 border-t border-gray-200">
         <button

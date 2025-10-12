@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import type { AddEmployeeRequest } from '../lib/api';
+import { api } from "../lib/api";
 
 interface EmployeeFormProps {
-  employee?: any | null; // Keep for future edit functionality
+  employee?: any | null;
   onSubmit: (employee: any) => Promise<void>;
   onCancel: () => void;
   loading?: boolean;
@@ -18,9 +18,14 @@ export default function EmployeeForm({
 }: EmployeeFormProps) {
   const [currentStep, setCurrentStep] = useState<FormStep>('personal');
   const [showReview, setShowReview] = useState(false);
+  const [departments, setDepartments] = useState<string[]>([]);
+  const [isEditMode, setIsEditMode] = useState(false);
 
   const [formData, setFormData] = useState({
-    // Personal Information (maps to API)
+    // Employee ID (new field)
+    employeeId: '',
+    
+    // Personal Information
     fullName: '',
     email: '',
     mobile: '',
@@ -37,7 +42,7 @@ export default function EmployeeForm({
     // Employment Details
     joinDate: '',
     salary: '',
-    department: '', // <--- new field
+    department: '',
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -50,15 +55,52 @@ export default function EmployeeForm({
 
   const currentStepIndex = steps.findIndex((s) => s.id === currentStep);
 
-  // Uncomment / adapt if you later want to initialise form from `employee` prop
-  // useEffect(() => {
-  //   if (employee) { /* ... */ }
-  // }, [employee]);
+  // Initialize form with employee data for edit mode
+  useEffect(() => {
+    if (employee) {
+      setIsEditMode(true);
+      console.log('Edit Mode - Loading employee data:', employee);
+      
+      setFormData({
+        employeeId: employee.id?.toString() || employee.employeeId?.toString() || '',
+        fullName: employee.name || employee.fullName || '',
+        email: employee.email || '',
+        mobile: employee.mobile || '',
+        dateOfBirth: employee.dob || '',
+        aadhar: employee.aadhar || '',
+        pan: employee.pan || '',
+        accountNumber: employee.accountNo?.toString() || '',
+        ifsc: employee.ifsc || '',
+        joinDate: employee.doj || '',
+        salary: employee.salary?.toString() || '',
+        department: employee.department || '',
+      });
+    }
+  }, [employee]);
+
+  useEffect(() => {
+    const fetchDepartments = async () => {
+      try {
+        const data = await api.getDepartments();
+        setDepartments(data);
+      } catch (err) {
+        console.error("Failed to fetch departments:", err);
+      }
+    };
+    fetchDepartments();
+  }, []);
 
   const validateStep = (step: FormStep): boolean => {
     const newErrors: Record<string, string> = {};
 
     if (step === 'personal') {
+      // Employee ID validation
+      if (!formData.employeeId.trim()) {
+        newErrors.employeeId = 'Employee ID is required';
+      } else if (!/^\d+$/.test(formData.employeeId)) {
+        newErrors.employeeId = 'Employee ID must be numeric';
+      }
+      
       if (!formData.fullName.trim()) newErrors.fullName = 'Full name is required';
       if (!formData.email.trim()) newErrors.email = 'Email is required';
       else if (!/\S+@\S+\.\S+/.test(formData.email)) newErrors.email = 'Invalid email';
@@ -95,7 +137,7 @@ export default function EmployeeForm({
       if (!formData.joinDate) newErrors.joinDate = 'Join date is required';
       if (!formData.salary) newErrors.salary = 'Salary is required';
       else if (Number(formData.salary) <= 0) newErrors.salary = 'Salary must be positive';
-      if (!formData.department.trim()) newErrors.department = 'Department is required'; // <--- new validation
+      if (!formData.department.trim()) newErrors.department = 'Department is required';
     }
 
     setErrors(newErrors);
@@ -118,40 +160,45 @@ export default function EmployeeForm({
     }
   };
 
-  // handleSubmit accepts optional event so it can be called from modal confirm (no event)
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e && typeof e.preventDefault === 'function') e.preventDefault();
 
     // Validate current step first
     if (!validateStep(currentStep)) return;
 
-    // Validate all steps
+    // Validate all steps before submission
     const allSteps: FormStep[] = ['personal', 'documents', 'bank', 'employment'];
+    let allValid = true;
+    
     for (const step of allSteps) {
       if (!validateStep(step)) {
-        setCurrentStep(step);
+        allValid = false;
+        setCurrentStep(step); // Jump to the invalid step
         return;
       }
     }
 
+    if (!allValid) return;
+
     try {
-      // Map formData -> API payload
-      const apiData = {
-        
+      const apiData: any = {
+        id: parseInt(formData.employeeId),
         email: formData.email.trim().toLowerCase(),
         mobile: formData.mobile.trim().replace(/\s/g, ''),
         name: formData.fullName.trim(),
         doj: formData.joinDate,
         dob: formData.dateOfBirth,
+        department: formData.department.trim(),
         details: {
           salary: parseFloat(formData.salary || '0'),
           aadhar: formData.aadhar.trim().replace(/\s/g, ''),
           pan: formData.pan.trim().toUpperCase(),
-          accountNo: Number(formData.accountNumber.trim() || 0),
+          accountNo: parseInt(formData.accountNumber.trim()),
           ifsc: formData.ifsc.trim().toUpperCase(),
-          department: formData.department.trim(), // <--- new field
         },
       };
+
+      console.log(`${isEditMode ? 'Update' : 'Create'} - Form submitting data:`, apiData);
 
       await onSubmit(apiData);
     } catch (err) {
@@ -200,7 +247,13 @@ export default function EmployeeForm({
       {/* Form Steps */}
       <div className="min-h-80">
         {currentStep === 'personal' && (
-          <PersonalInfoStep formData={formData} errors={errors} onChange={handleChange} loading={loading} />
+          <PersonalInfoStep 
+            formData={formData} 
+            errors={errors} 
+            onChange={handleChange} 
+            loading={loading} 
+            isEditMode={isEditMode}
+          />
         )}
         {currentStep === 'documents' && (
           <DocumentsStep formData={formData} errors={errors} onChange={handleChange} loading={loading} />
@@ -209,7 +262,15 @@ export default function EmployeeForm({
           <BankStep formData={formData} errors={errors} onChange={handleChange} loading={loading} />
         )}
         {currentStep === 'employment' && (
-          <EmploymentStep formData={formData} errors={errors} onChange={handleChange} loading={loading} onReview={() => setShowReview(true)} />
+          <EmploymentStep 
+            formData={formData} 
+            errors={errors} 
+            onChange={handleChange} 
+            loading={loading} 
+            onReview={() => setShowReview(true)} 
+            departments={departments}
+            isEditMode={isEditMode}
+          />
         )}
       </div>
 
@@ -246,11 +307,23 @@ export default function EmployeeForm({
               Next →
             </button>
           ) : (
-            // FINAL STEP: show both Review and Submit buttons
-            <>
-              
+            // FINAL STEP: Show Review and Submit buttons separately
+            <div className="flex space-x-3">
               <button
-                type="submit"
+                type="button"
+                onClick={() => setShowReview(true)}
+                disabled={loading}
+                className="btn-secondary disabled:opacity-50"
+              >
+                👁️ Review
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleSubmit(e);
+                }}
                 disabled={loading}
                 className="btn-primary disabled:opacity-50 flex items-center"
               >
@@ -264,32 +337,29 @@ export default function EmployeeForm({
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                   </svg>
                 )}
-                Add Employee
+                {isEditMode ? '✏️ Update Employee' : '➕ Add Employee'}
               </button>
-            </>
+            </div>
           )}
         </div>
       </div>
+
       {/* Review Modal */}
-<ReviewModal
-  visible={showReview}
-  data={formData}
-  onClose={() => setShowReview(false)}
-  onConfirm={handleSubmit}
-  loading={loading}
-/>
-      
+      <ReviewModal
+        visible={showReview}
+        data={formData}
+        onClose={() => setShowReview(false)}
+        onConfirm={handleSubmit}
+        loading={loading}
+        isEditMode={isEditMode}
+      />
     </form>
-    
   );
 }
 
+/* Step Components */
 
-/* ---------------------------
-   Step Components (unchanged, with email warning)
-   --------------------------- */
-
-function PersonalInfoStep({ formData, errors, onChange, loading }: any) {
+function PersonalInfoStep({ formData, errors, onChange, loading, isEditMode }: any) {
   return (
     <div className="space-y-4">
       <h3 className="text-lg font-semibold text-gray-900 mb-4">Personal Information</h3>
@@ -298,6 +368,75 @@ function PersonalInfoStep({ formData, errors, onChange, loading }: any) {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Employee ID Field with Generate Button */}
+        <div className="md:col-span-2">
+          <div className="flex items-center mb-2">
+            <label className="block text-sm font-medium text-gray-700">
+              Employee ID * 
+              {isEditMode && <span className="text-blue-600 ml-2">(Editable)</span>}
+            </label>
+            
+            {/* Info Tooltip */}
+            <div className="relative group ml-2">
+              <button
+                type="button"
+                className="inline-flex items-center justify-center w-5 h-5 text-xs font-medium text-blue-600 bg-blue-100 rounded-full hover:bg-blue-200 focus:outline-none"
+              >
+                i
+              </button>
+              <div className="absolute left-0 top-6 w-72 p-3 bg-gray-900 text-white text-xs rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-10">
+                <p className="font-semibold mb-1">📋 Employee ID Options:</p>
+                <ul className="list-disc list-inside space-y-1 text-xs">
+                  <li>Enter existing employee ID if transferring from another system</li>
+                  <li>Click "Generate ID" to auto-generate a unique ID</li>
+                  <li>ID format (numeric/alphanumeric) can be configured in Company Settings</li>
+                </ul>
+                <p className="mt-2 text-yellow-200 text-xs">⚠️ Currently in demo mode - generates numeric IDs only</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex gap-2">
+            <input
+              type="text"
+              placeholder="1001"
+              className={`input-field flex-1 ${errors.employeeId ? 'border-red-500' : ''}`}
+              value={formData.employeeId}
+              onChange={(e) => onChange('employeeId', e.target.value.replace(/\D/g, ''))}
+              disabled={loading}
+            />
+            
+            {/* Generate ID Button */}
+            {!isEditMode && (
+              <button
+                type="button"
+                onClick={() => {
+                  // Demo: Generate random numeric ID (4-6 digits)
+                  const randomId = Math.floor(1000 + Math.random() * 90000);
+                  onChange('employeeId', randomId.toString());
+                }}
+                disabled={loading}
+                className="px-4 py-2 bg-gradient-to-r from-purple-500 to-purple-600 text-white text-sm font-medium rounded-lg hover:from-purple-600 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md hover:shadow-lg whitespace-nowrap"
+                title="Generate a unique employee ID"
+              >
+                <span className="flex items-center">
+                  <span className="mr-1">🎲</span>
+                  Generate ID
+                </span>
+              </button>
+            )}
+          </div>
+          
+          {errors.employeeId && <p className="text-xs text-red-600 mt-1">{errors.employeeId}</p>}
+          {!errors.employeeId && (
+            <p className="text-xs text-gray-500 mt-1">
+              {isEditMode 
+                ? 'Employee ID can be updated if needed' 
+                : 'Enter existing ID or click "Generate ID" to create a new one'}
+            </p>
+          )}
+        </div>
+
         <div className="md:col-span-2">
           <label className="block text-sm font-medium text-gray-700 mb-2">Full Name *</label>
           <input
@@ -312,19 +451,20 @@ function PersonalInfoStep({ formData, errors, onChange, loading }: any) {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">Email *</label>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Email * 
+            {isEditMode && <span className="text-red-600 ml-2">(Cannot be changed)</span>}
+          </label>
           <input
             type="email"
             placeholder="john.doe@example.com"
-            className={`input-field ${errors.email ? 'border-red-500' : ''}`}
+            className={`input-field ${errors.email ? 'border-red-500' : ''} ${isEditMode ? 'bg-gray-100 cursor-not-allowed' : ''}`}
             value={formData.email}
             onChange={(e) => onChange('email', e.target.value)}
-            disabled={loading}
+            disabled={loading || isEditMode}
           />
           {errors.email && <p className="text-xs text-red-600 mt-1">{errors.email}</p>}
-
-          {/* WARNING TEXT: crucial email note */}
-          {!errors.email && (
+          {!errors.email && !isEditMode && (
             <p className="text-xs text-red-600 mt-1">
               ⚠️ Please double-check the email — it cannot be changed later.
             </p>
@@ -447,26 +587,22 @@ function BankStep({ formData, errors, onChange, loading }: any) {
   );
 }
 
-function EmploymentStep({ formData, errors, onChange, loading, onReview }: any) {
-  // ✅ Check if all required fields are filled
+function EmploymentStep({ formData, errors, onChange, loading, onReview, departments, isEditMode }: any) {
   const isFormValid =
     formData.joinDate &&
     formData.salary &&
+    formData.department &&
     !errors.joinDate &&
-    !errors.salary;
+    !errors.salary &&
+    !errors.department;
 
   return (
     <div className="space-y-4">
-      <h3 className="text-lg font-semibold text-gray-900 mb-4">
-        Employment Information
-      </h3>
+      <h3 className="text-lg font-semibold text-gray-900 mb-4">Employment Information</h3>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Date of Joining */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Date of Joining *
-          </label>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Date of Joining *</label>
           <input
             type="date"
             className={`input-field ${errors.joinDate ? "border-red-500" : ""}`}
@@ -475,16 +611,11 @@ function EmploymentStep({ formData, errors, onChange, loading, onReview }: any) 
             disabled={loading}
             max={new Date().toISOString().split("T")[0]}
           />
-          {errors.joinDate && (
-            <p className="text-xs text-red-600 mt-1">{errors.joinDate}</p>
-          )}
+          {errors.joinDate && <p className="text-xs text-red-600 mt-1">{errors.joinDate}</p>}
         </div>
 
-        {/* Monthly Salary */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Monthly Salary *
-          </label>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Monthly Salary *</label>
           <input
             type="number"
             placeholder="50000"
@@ -495,41 +626,38 @@ function EmploymentStep({ formData, errors, onChange, loading, onReview }: any) 
             min="0"
             step="1000"
           />
-          {errors.salary && (
-            <p className="text-xs text-red-600 mt-1">{errors.salary}</p>
-          )}
-          <p className="text-xs text-gray-500 mt-1">
-            Enter monthly salary amount in ₹
-          </p>
+          {errors.salary && <p className="text-xs text-red-600 mt-1">{errors.salary}</p>}
+          <p className="text-xs text-gray-500 mt-1">Enter monthly salary amount in ₹</p>
         </div>
 
-        {/* Department */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Department *
-            </label>
-            <input
-              type="text"
-              placeholder="e.g., HR, Finance"
-              className={`input-field ${errors.department ? 'border-red-500' : ''}`}
-              value={formData.department}
-              onChange={(e) => onChange('department', e.target.value)}
-              disabled={loading}
-            />
-            {errors.department && (
-              <p className="text-xs text-red-600 mt-1">{errors.department}</p>
-            )}
-          </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Department *</label>
+          <select
+            className={`input-field ${errors.department ? 'border-red-500' : ''}`}
+            value={formData.department}
+            onChange={(e) => onChange('department', e.target.value)}
+            disabled={loading}
+          >
+            <option value="">Select Department</option>
+            {departments.map((dept: string) => (
+              <option key={dept} value={dept}>{dept}</option>
+            ))}
+          </select>
+          {errors.department && <p className="text-xs text-red-600 mt-1">{errors.department}</p>}
+          <p className="text-xs text-gray-500 mt-1">Select the employee's department</p>
+        </div>
       </div>
 
-      {/* Almost Done Box */}
       <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mt-6">
-        <h4 className="font-medium text-yellow-900 mb-2">Almost Done!</h4>
+        <h4 className="font-medium text-yellow-900 mb-2">
+          {isEditMode ? 'Ready to Update!' : 'Almost Done!'}
+        </h4>
         <p className="text-sm text-yellow-800 mb-4">
-          Review your information and click "Add Employee" to complete the registration.
+          {isEditMode 
+            ? 'You can review your changes or directly update the employee information.'
+            : 'Review your information and click "Add Employee" to complete the registration.'}
         </p>
 
-        {/* ✅ Review Button */}
         <button
           type="button"
           onClick={onReview}
@@ -540,25 +668,17 @@ function EmploymentStep({ formData, errors, onChange, loading, onReview }: any) 
               : "bg-gray-300 text-gray-500 cursor-not-allowed"
           }`}
         >
-          Review Before Submit
+          👁️ Review Before Submit
         </button>
       </div>
     </div>
   );
 }
 
-
-/* ---------------------------
-   Review Modal (rendered via showReview state)
-   --------------------------- */
-/* NOTE: The modal markup is intentionally placed outside the form return so it can be shown anywhere in the DOM.
-   If you'd prefer it inside the main component return, move the following snippet into the return block. */
-   
-   
-export function ReviewModal({ visible, data, onClose, onConfirm, loading }: any) {
+/* Review Modal */
+export function ReviewModal({ visible, data, onClose, onConfirm, loading, isEditMode }: any) {
   if (!visible) return null;
 
-  // Format currency
   const formatCurrency = (amount: string) => {
     const num = parseFloat(amount);
     return new Intl.NumberFormat('en-IN', {
@@ -568,7 +688,6 @@ export function ReviewModal({ visible, data, onClose, onConfirm, loading }: any)
     }).format(num);
   };
 
-  // Format date
   const formatDate = (dateStr: string) => {
     if (!dateStr) return '-';
     return new Date(dateStr).toLocaleDateString('en-IN', {
@@ -578,12 +697,17 @@ export function ReviewModal({ visible, data, onClose, onConfirm, loading }: any)
     });
   };
 
-  // Section data organized for better display
+  const formatAadhar = (aadhar: string) => {
+    if (!aadhar) return '-';
+    return aadhar.replace(/(\d{4})(\d{4})(\d{4})/, '$1 $2 $3');
+  };
+
   const sections = [
     {
       title: 'Personal Information',
       icon: '👤',
       fields: [
+        { label: 'Employee ID', value: data.employeeId },
         { label: 'Full Name', value: data.fullName },
         { label: 'Email', value: data.email },
         { label: 'Mobile', value: data.mobile },
@@ -612,16 +736,10 @@ export function ReviewModal({ visible, data, onClose, onConfirm, loading }: any)
       fields: [
         { label: 'Date of Joining', value: formatDate(data.joinDate) },
         { label: 'Monthly Salary', value: data.salary ? formatCurrency(data.salary) : '-' },
-        { label: 'Department', value: data.department || '-' }, // <-- added department
+        { label: 'Department', value: data.department || '-' },
       ],
     }
   ];
-
-  // Format Aadhar (XXXX XXXX XXXX)
-  const formatAadhar = (aadhar: string) => {
-    if (!aadhar) return '-';
-    return aadhar.replace(/(\d{4})(\d{4})(\d{4})/, '$1 $2 $3');
-  };
 
   return (
     <div 
@@ -633,11 +751,12 @@ export function ReviewModal({ visible, data, onClose, onConfirm, loading }: any)
       }}
     >
       <div className="bg-white rounded-lg shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
-        {/* Header */}
         <div className="px-6 py-4 border-b border-gray-200">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-xl font-bold text-gray-900">Review Employee Details</h3>
+              <h3 className="text-xl font-bold text-gray-900">
+                {isEditMode ? 'Review Employee Changes' : 'Review Employee Details'}
+              </h3>
               <p className="text-sm text-gray-500 mt-1">
                 Please verify all information before submitting
               </p>
@@ -654,7 +773,6 @@ export function ReviewModal({ visible, data, onClose, onConfirm, loading }: any)
           </div>
         </div>
 
-        {/* Content - Scrollable */}
         <div className="flex-1 overflow-y-auto px-6 py-4">
           <div className="space-y-6">
             {sections.map((section, idx) => (
@@ -681,7 +799,6 @@ export function ReviewModal({ visible, data, onClose, onConfirm, loading }: any)
             ))}
           </div>
 
-          {/* Warning Box */}
           <div className="mt-6 bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded">
             <div className="flex">
               <div className="flex-shrink-0">
@@ -691,7 +808,8 @@ export function ReviewModal({ visible, data, onClose, onConfirm, loading }: any)
                 <h3 className="text-sm font-medium text-yellow-800">Important Notice</h3>
                 <div className="mt-2 text-sm text-yellow-700">
                   <ul className="list-disc list-inside space-y-1">
-                    <li>Email address cannot be changed after submission</li>
+                    {!isEditMode && <li>Email address cannot be changed after submission</li>}
+                    {isEditMode && <li>Email address cannot be modified</li>}
                     <li>Please verify all bank details carefully</li>
                     <li>Ensure all government document numbers are correct</li>
                   </ul>
@@ -701,7 +819,6 @@ export function ReviewModal({ visible, data, onClose, onConfirm, loading }: any)
           </div>
         </div>
 
-        {/* Footer - Fixed */}
         <div className="px-6 py-4 border-t border-gray-200 bg-gray-50">
           <div className="flex items-center justify-between">
             <button
@@ -737,12 +854,12 @@ export function ReviewModal({ visible, data, onClose, onConfirm, loading }: any)
                       d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                     ></path>
                   </svg>
-                  Adding Employee...
+                  {isEditMode ? 'Updating Employee...' : 'Adding Employee...'}
                 </>
               ) : (
                 <>
                   <span className="mr-2">✓</span>
-                  Confirm & Add Employee
+                  {isEditMode ? 'Confirm & Update Employee' : 'Confirm & Add Employee'}
                 </>
               )}
             </button>

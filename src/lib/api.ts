@@ -110,17 +110,18 @@ export interface CompanyDetails {
   email: string;
   name: string;
   doc: string; // YYYY-MM-DD
-  about: string;
+  about?: string;
+  departments: string[]; // Updated: now required array
   lastAllowedCheckInTime: string; // HH:MM:SS.nnnnnnnnn
   beginCheckOutTime: string; // HH:MM:SS.nnnnnnnnn
   details: {
-    regNumber: string;
-    pan: string;
-    companyType: string;
+    regNumber?: string;
+    pan?: string;
+    companyType?: string;
   };
 }
 
-// Attendance (Backend format)
+// Attendance (Backend format) - Updated status enum
 export interface AttendanceResponse {
   details: {
     employeeEmail: string;
@@ -128,11 +129,11 @@ export interface AttendanceResponse {
   };
   checkIn: string | null; // HH:MM:SS.nnnnnnnnn
   checkOut: string | null; // HH:MM:SS.nnnnnnnnn
-  attendanceStatus: "NOT_MARKED" | "PRESENT" | "ABSENT" | "LATE" | "HALF_DAY" | "CHECKED_IN" | "CHECK_IN_APPROVAL_REQUESTED" | "CHECK_OUT_APPROVAL_REQUESTED" | string;
+  attendanceStatus: "NOT_MARKED" | "CHECK_IN_APPROVAL_REQUESTED" | "CHECK_IN_REJECTED" | "CHECKED_IN" | "CHECK_OUT_APPROVAL_REQUESTED" | "CHECKED_OUT" | "CHECK_OUT_REJECTED";
   otHours: number;
 }
 
-// Employee (Backend format)
+// Employee (Backend format) - Updated with required department
 export interface EmployeeResponse {
   email: string;
   mobile: string;
@@ -140,12 +141,13 @@ export interface EmployeeResponse {
   name: string;
   doj: string; // YYYY-MM-DD
   dob: string; // YYYY-MM-DD
+  department: string; // Now required
   details: {
     salary: number;
-    aadhar: string;
-    pan: string;
-    accountNo: number;
-    ifsc: string;
+    aadhar?: string;
+    pan?: string;
+    accountNo?: number;
+    ifsc?: string;
   };
 }
 
@@ -167,13 +169,13 @@ export interface AddEmployeeRequest {
   name: string;
   doj: string; // YYYY-MM-DD
   dob: string; // YYYY-MM-DD
+  department: string; // Now required
   details: {
     salary: number;
-    aadhar: string;
-    pan: string;
-    accountNo: number;
-    ifsc: string;
-    department?: string;
+    aadhar?: string;
+    pan?: string;
+    accountNo?: number;
+    ifsc?: string;
   };
 }
 
@@ -193,18 +195,18 @@ export interface Employee {
   doj: string;
   dob: string;
   salary: number;
-  aadhar: string;
-  pan: string;
-  accountNo: number;
-  ifsc: string;
+  aadhar?: string;
+  pan?: string;
+  accountNo?: number;
+  ifsc?: string;
   position?: string;
-  department?: string;
+  department: string; // Now required
   status?: string;
   createdAt?: string;
   updatedAt?: string;
 }
 
-// Attendance Record (Frontend format)
+// Attendance Record (Frontend format) - Updated status types
 export interface AttendanceRecord {
   id: string;
   employeeId: string;
@@ -213,14 +215,14 @@ export interface AttendanceRecord {
   checkIn: string | null;
   checkOut: string | null;
   workingHours: number;
-  status: 'present' | 'absent' | 'late' | 'half-day' | 'not-marked' | 'checked-in' | 'check-in-requested' | 'check-out-requested';
+  status: 'not-marked' | 'check-in-requested' | 'check-in-rejected' | 'checked-in' | 'check-out-requested' | 'checked-out' | 'check-out-rejected';
   notes?: string;
 }
 
 export interface AttendanceMarkRequest {
   employeeId: string;
   date: string;
-  status: 'present' | 'absent' | 'late' | 'half-day';
+  status: 'not-marked' | 'check-in-requested' | 'check-in-rejected' | 'checked-in' | 'check-out-requested' | 'checked-out' | 'check-out-rejected';
   checkIn?: string | null;
   checkOut?: string | null;
   notes?: string;
@@ -266,13 +268,12 @@ export interface DashboardStats {
 function mapAttendanceStatus(backendStatus: string): AttendanceRecord['status'] {
   const statusMap: Record<string, AttendanceRecord['status']> = {
     'NOT_MARKED': 'not-marked',
-    'PRESENT': 'present',
-    'ABSENT': 'absent',
-    'LATE': 'late',
-    'HALF_DAY': 'half-day',
-    'CHECKED_IN': 'checked-in',
     'CHECK_IN_APPROVAL_REQUESTED': 'check-in-requested',
+    'CHECK_IN_REJECTED': 'check-in-rejected',
+    'CHECKED_IN': 'checked-in',
     'CHECK_OUT_APPROVAL_REQUESTED': 'check-out-requested',
+    'CHECKED_OUT': 'checked-out',
+    'CHECK_OUT_REJECTED': 'check-out-rejected',
   };
   return statusMap[backendStatus] || 'not-marked';
 }
@@ -318,7 +319,7 @@ function mapEmployeeResponse(emp: EmployeeResponse): Employee {
     accountNo: emp.details.accountNo,
     ifsc: emp.details.ifsc,
     position: '',
-    department: '',
+    department: emp.department, // Now from root level
     status: 'active',
   };
 }
@@ -380,13 +381,34 @@ export const api = {
     }
   },
 
+  async updateCompanyDetails(company: CompanyDetails): Promise<CompanyDetails> {
+    try {
+      const res = await axios.put(`${BASE_URL}`, company);
+      return res.data;
+    } catch (err) {
+      throw new Error(parseApiError(err));
+    }
+  },
+
+  // ========== DEPARTMENTS ==========
+  async getDepartments(): Promise<string[]> {
+    try {
+      const res = await axios.get(`${BASE_URL}/deps`);
+      return res.data;
+    } catch (err) {
+      throw new Error(parseApiError(err));
+    }
+  },
+
   // ========== ATTENDANCE ==========
   /**
    * Get all attendance records (for HR dashboard)
+   * @param date - Optional date filter (YYYY-MM-DD)
    */
-  async getAllAttendance(): Promise<AttendanceResponse[]> {
+  async getAllAttendance(date?: string): Promise<AttendanceResponse[]> {
     try {
-      const res = await axios.get(`${BASE_URL}/attendence`);
+      const params = date ? { date } : {};
+      const res = await axios.get(`${BASE_URL}/attendence`, { params });
       return res.data;
     } catch (err) {
       throw new Error(parseApiError(err));
@@ -407,17 +429,41 @@ export const api = {
   },
 
   /**
-   * Approve attendance for a specific employee
+   * Update attendance for a specific employee
    * @param employeeEmail - Employee's email address (used as ID)
+   * @param attendance - Attendance data to update
+   * @param date - Optional date parameter (YYYY-MM-DD)
    */
-  async approveAttendance(employeeEmail: string): Promise<AttendanceResponse> {
+  async updateAttendance(
+    employeeEmail: string,
+    attendance: AttendanceResponse,
+    date?: string
+  ): Promise<AttendanceResponse> {
     try {
-      console.log(`[API] Approving attendance for: ${employeeEmail}`);
-      console.log(`[API] URL: ${BASE_URL}/attendence/approve/${employeeEmail}`);
+      const params = date ? { date } : {};
+      const res = await axios.put(
+        `${BASE_URL}/attendence/${employeeEmail}`,
+        attendance,
+        { params }
+      );
+      return res.data;
+    } catch (err) {
+      throw new Error(parseApiError(err));
+    }
+  },
+
+  /**
+   * Approve or reject attendance for a specific employee
+   * @param employeeEmail - Employee's email address (used as ID)
+   * @param reject - If true, rejects the attendance request; if false/undefined, approves it
+   */
+  async approveAttendance(employeeEmail: string, reject?: boolean): Promise<AttendanceResponse> {
+    try {
+      console.log(`[API] ${reject ? 'Rejecting' : 'Approving'} attendance for: ${employeeEmail}`);
+      const params = reject ? { reject: true } : {};
+      const res = await axios.post(`${BASE_URL}/attendence/approve/${employeeEmail}`, null, { params });
       
-      const res = await axios.post(`${BASE_URL}/attendence/approve/${employeeEmail}`);
-      
-      console.log(`[API] Approve response:`, res.data);
+      console.log(`[API] Approve/Reject response:`, res.data);
       return res.data;
     } catch (err: any) {
       console.error(`[API] Approve attendance error:`, err.response?.data || err.message);
@@ -428,41 +474,68 @@ export const api = {
   /**
    * Get attendance records for a specific date, mapped to frontend format
    */
-  async getAttendance(date: string): Promise<AttendanceRecord[]> {
-    try {
-      // Get all attendance records
-      const allAttendance = await this.getAllAttendance();
+  // Replace your api.getAttendance() function with this version that has debug logging:
+
+async getAttendance(date: string): Promise<AttendanceRecord[]> {
+  try {
+    // Get attendance records filtered by date
+    const allAttendance = await this.getAllAttendance(date);
+    
+    console.log('═══════════════════════════════════════');
+    console.log('🔍 RAW BACKEND RESPONSE for date:', date);
+    console.log('Number of records:', allAttendance.length);
+    
+    allAttendance.forEach((att, index) => {
+      console.log(`\n[Record ${index}] Employee: ${att.details.employeeEmail}`);
+      console.log('  Raw backend data:', JSON.stringify(att, null, 2));
+      console.log('  attendanceStatus:', att.attendanceStatus);
+      console.log('  checkIn:', att.checkIn);
+      console.log('  checkOut:', att.checkOut);
+      console.log('  otHours:', att.otHours);
+    });
+    console.log('═══════════════════════════════════════\n');
+    
+    // Get all employees to map names
+    const employees = await this.getAllEmployees();
+    const employeeMap = new Map(employees.map(emp => [emp.email, emp]));
+    
+    // Map to frontend format
+    const mappedAttendance = allAttendance.map(att => {
+      const employee = employeeMap.get(att.details.employeeEmail);
+      const workingHours = att.otHours || calculateWorkingHours(att.checkIn, att.checkOut);
       
-      // Get all employees to map names
-      const employees = await this.getAllEmployees();
-      const employeeMap = new Map(employees.map(emp => [emp.email, emp]));
+      const mapped = {
+        id: `${att.details.employeeEmail}-${att.details.attendanceDate}`,
+        employeeId: att.details.employeeEmail,
+        employeeName: employee?.name || att.details.employeeEmail,
+        date: att.details.attendanceDate,
+        checkIn: att.checkIn,
+        checkOut: att.checkOut,
+        workingHours: workingHours,
+        status: mapAttendanceStatus(att.attendanceStatus),
+        rawStatus: att.attendanceStatus, // Add raw status for debugging
+        notes: undefined,
+      };
       
-      // Filter by date and map to frontend format
-      const filteredAttendance = allAttendance
-        .filter(att => att.details.attendanceDate === date)
-        .map(att => {
-          const employee = employeeMap.get(att.details.employeeEmail);
-          const workingHours = att.otHours || calculateWorkingHours(att.checkIn, att.checkOut);
-          
-          return {
-            id: `${att.details.employeeEmail}-${att.details.attendanceDate}`,
-            employeeId: att.details.employeeEmail,
-            employeeName: employee?.name || att.details.employeeEmail,
-            date: att.details.attendanceDate,
-            checkIn: att.checkIn,
-            checkOut: att.checkOut,
-            workingHours: workingHours,
-            status: mapAttendanceStatus(att.attendanceStatus),
-            notes: undefined,
-          };
-        });
+      console.log(`\n📋 MAPPED record for ${employee?.name}:`);
+      console.log('  checkIn (backend):', att.checkIn);
+      console.log('  checkIn (mapped):', mapped.checkIn);
+      console.log('  checkOut (backend):', att.checkOut);
+      console.log('  checkOut (mapped):', mapped.checkOut);
+      console.log('  status (backend):', att.attendanceStatus);
+      console.log('  status (mapped):', mapped.status);
       
-      return filteredAttendance;
-    } catch (err) {
-      console.error("[API] getAttendance error:", err);
-      throw err;
-    }
-  },
+      return mapped;
+    });
+    
+    console.log('\n✅ Final mapped attendance records:', mappedAttendance.length);
+    
+    return mappedAttendance;
+  } catch (err) {
+    console.error("[API] getAttendance error:", err);
+    throw err;
+  }
+},
 
   // ========== EMPLOYEES ==========
   /**
@@ -490,6 +563,10 @@ export const api = {
     }
   },
 
+  /**
+   * Get a specific employee by ID
+   * @param employeeId - Employee's email address (used as ID)
+   */
   async getEmployee(employeeId: string): Promise<EmployeeResponse> {
     try {
       const res = await axios.get(`${BASE_URL}/emp/${employeeId}`);
@@ -505,46 +582,40 @@ export const api = {
   async addEmployee(employee: AddEmployeeRequest): Promise<Employee> {
     try {
       const res = await axios.post(`${BASE_URL}/emp`, employee);
-      const employeeId = res.data.employeeId;
-
-      // Map request + response to full frontend Employee object
-      const newEmployee: Employee = {
-        id: employeeId || employee.email,
-        employeeId: employeeId || employee.email,
-        email: employee.email,
-        mobile: employee.mobile,
-        name: employee.name,
-        fullName: employee.name,
-        doj: employee.doj,
-        dob: employee.dob,
-        salary: employee.details.salary,
-        aadhar: employee.details.aadhar,
-        pan: employee.details.pan,
-        accountNo: employee.details.accountNo,
-        ifsc: employee.details.ifsc,
-        position: "",
-        department: "",
-        status: "active",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-
-      return newEmployee;
+      // Backend returns the created employee object
+      return mapEmployeeResponse(res.data);
     } catch (err) {
       console.error("[API] addEmployee error:", err);
       throw err;
     }
   },
 
-  // TODO: Update and Delete endpoints not yet available
-  async updateEmployee(employeeId: string, data: Partial<Employee>) {
-    console.warn("[API] updateEmployee not yet implemented on backend");
-    throw new Error("Update employee endpoint not available");
+  /**
+   * Update an existing employee
+   * @param employeeId - Employee's email address (used as ID)
+   * @param employee - Employee data to update
+   */
+  async updateEmployee(employeeId: string, employee: AddEmployeeRequest): Promise<Employee> {
+    try {
+      const res = await axios.put(`${BASE_URL}/emp/${employeeId}`, employee);
+      return mapEmployeeResponse(res.data);
+    } catch (err) {
+      console.error("[API] updateEmployee error:", err);
+      throw err;
+    }
   },
 
-  async deleteEmployee(employeeId: string) {
-    console.warn("[API] deleteEmployee not yet implemented on backend");
-    throw new Error("Delete employee endpoint not available");
+  /**
+   * Delete an employee
+   * @param employeeId - Employee's email address (used as ID)
+   */
+  async deleteEmployee(employeeId: string): Promise<void> {
+    try {
+      await axios.delete(`${BASE_URL}/emp/${employeeId}`);
+    } catch (err) {
+      console.error("[API] deleteEmployee error:", err);
+      throw err;
+    }
   },
 
   // ========== PAYROLL (MOCK) ==========
@@ -554,12 +625,12 @@ export const api = {
     return [];
   },
 
-  async generatePayroll(employeeId: string, month: string, year: number) {
+  async generatePayroll(_employeeId: string, _month: string, _year: number) {
     console.warn("[API] generatePayroll not yet implemented on backend");
     throw new Error("Payroll generation endpoint not available");
   },
 
-  async updatePayrollStatus(payrollId: string, status: PayrollRecord['status']) {
+  async updatePayrollStatus(_payrollId: string, _status: PayrollRecord['status']) {
     console.warn("[API] updatePayrollStatus not yet implemented on backend");
     throw new Error("Payroll status update endpoint not available");
   },
@@ -581,10 +652,10 @@ export const api = {
       return {
         totalEmployees: employees.length,
         presentToday: todayAttendance.filter(
-          (att) => att.attendanceStatus === "PRESENT" || att.attendanceStatus === "LATE" || att.attendanceStatus === "CHECKED_IN"
+          (att) => att.attendanceStatus === "CHECKED_IN" || att.attendanceStatus === "CHECKED_OUT"
         ).length,
-        absentToday: todayAttendance.filter((att) => att.attendanceStatus === "ABSENT").length,
-        lateToday: todayAttendance.filter((att) => att.attendanceStatus === "LATE").length,
+        absentToday: todayAttendance.filter((att) => att.attendanceStatus === "NOT_MARKED").length,
+        lateToday: todayAttendance.filter((att) => att.attendanceStatus === "CHECK_IN_APPROVAL_REQUESTED").length,
         totalSalaryThisMonth: employees.reduce((sum, emp) => sum + emp.details.salary, 0),
         pendingPayrolls: 0, // Not available from backend yet
       };
