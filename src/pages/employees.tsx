@@ -189,6 +189,11 @@ const handleCreateEmployee = async (formData: any) => {
     };
     
     console.log('CREATE - Prepared Employee Data:', JSON.stringify(employeeData, null, 2));
+
+    // ✅ Actually call the API to create the employee
+    await api.addEmployee(employeeData);
+
+    // Then reload the list
     await loadEmployees();
 
     setIsAddModalOpen(false);
