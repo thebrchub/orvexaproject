@@ -1,5 +1,3 @@
-// src/pages/support/SupportCompanyDemoPage.tsx
-
 import { useState, useEffect } from 'react';
 import {
   TextField,
@@ -26,6 +24,10 @@ import {
   MenuItem,
   FormControl,
   FormHelperText,
+  Snackbar,
+  Alert,
+  CircularProgress,
+  TableSortLabel,
 } from '@mui/material';
 import { Visibility, Delete, Business, Add } from '@mui/icons-material';
 import axios from 'axios';
@@ -47,6 +49,15 @@ interface Company {
   beginCheckOutTime: string;
   details: CompanyDetails;
 }
+
+interface SnackbarState {
+  open: boolean;
+  message: string;
+  severity: 'success' | 'error' | 'warning' | 'info';
+}
+
+type SortField = 'email' | 'name' | 'doc' | 'departments';
+type SortOrder = 'asc' | 'desc';
 
 const BASE_URL = 'https://hrms-app-deploy-production.up.railway.app/v1/support';
 
@@ -81,11 +92,21 @@ const formatLocalTime = (utcTimeStr: string) => {
   });
 };
 
-// Convert DOC (YYYY-MM-DD) in UTC → local display
+// Convert DOC (YYYY-MM-DD) in UTC → local display (DD/MM/YYYY format)
 const formatLocalDate = (utcDateStr: string) => {
   if (!utcDateStr) return '';
   const date = new Date(utcDateStr + 'T00:00:00Z');
-  return date.toLocaleDateString();
+  return date.toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric'
+  });
+};
+
+// PAN card validation: ABCDE1234F format (5 letters, 4 digits, 1 letter)
+const validatePAN = (pan: string): boolean => {
+  const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
+  return panRegex.test(pan);
 };
 
 // -----------------------------------------------------------------
@@ -94,6 +115,13 @@ const SupportCompanyDemoPage = () => {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Snackbar state
+  const [snackbar, setSnackbar] = useState<SnackbarState>({
+    open: false,
+    message: '',
+    severity: 'info'
+  });
 
   // Form state
   const [email, setEmail] = useState('');
@@ -109,8 +137,43 @@ const SupportCompanyDemoPage = () => {
   const [pan, setPan] = useState('');
   const [companyType, setCompanyType] = useState('');
 
+  // Validation errors
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+
+  // Delete confirmation modal
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [companyToDelete, setCompanyToDelete] = useState<string>('');
+
+  // Sorting state
+  const [sortField, setSortField] = useState<SortField>('name');
+  const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
+
+  // Show snackbar helper
+  const showSnackbar = (message: string, severity: SnackbarState['severity']) => {
+    setSnackbar({ open: true, message, severity });
+  };
+
+  // Close snackbar
+  const handleCloseSnackbar = () => {
+    setSnackbar({ ...snackbar, open: false });
+  };
+
+  // Extract error message from API response
+  const extractErrorMessage = (err: any): string => {
+    if (err.response?.data?.details) {
+      return err.response.data.details;
+    }
+    if (err.response?.data?.message) {
+      return err.response.data.message;
+    }
+    if (err.response?.data?.error) {
+      return err.response.data.error;
+    }
+    return err.message || 'An unknown error occurred';
+  };
 
   // Fetch all companies
   const fetchCompanies = async () => {
@@ -121,7 +184,9 @@ const SupportCompanyDemoPage = () => {
       setError(null);
     } catch (err: any) {
       console.error(err);
-      setError(err.message || 'Failed to fetch companies');
+      const errorMsg = extractErrorMessage(err);
+      setError(errorMsg);
+      showSnackbar(`Failed to fetch companies: ${errorMsg}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -131,8 +196,108 @@ const SupportCompanyDemoPage = () => {
     fetchCompanies();
   }, []);
 
+  // Handle sorting
+  const handleSort = (field: SortField) => {
+    const isAsc = sortField === field && sortOrder === 'asc';
+    setSortOrder(isAsc ? 'desc' : 'asc');
+    setSortField(field);
+  };
+
+  // Sort companies
+  const sortedCompanies = [...companies].sort((a, b) => {
+    let aValue: any;
+    let bValue: any;
+
+    switch (sortField) {
+      case 'email':
+        aValue = a.email.toLowerCase();
+        bValue = b.email.toLowerCase();
+        break;
+      case 'name':
+        aValue = a.name.toLowerCase();
+        bValue = b.name.toLowerCase();
+        break;
+      case 'doc':
+        aValue = new Date(a.doc).getTime();
+        bValue = new Date(b.doc).getTime();
+        break;
+      case 'departments':
+        aValue = a.departments.length;
+        bValue = b.departments.length;
+        break;
+      default:
+        aValue = a.name.toLowerCase();
+        bValue = b.name.toLowerCase();
+    }
+
+    if (aValue < bValue) {
+      return sortOrder === 'asc' ? -1 : 1;
+    }
+    if (aValue > bValue) {
+      return sortOrder === 'asc' ? 1 : -1;
+    }
+    return 0;
+  });
+
+  // Validate form
+  const validateForm = (): boolean => {
+    const newErrors: Record<string, string> = {};
+
+    if (!email.trim()) newErrors.email = 'Email is required';
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) newErrors.email = 'Invalid email format (must contain @ and domain)';
+    
+    if (!name.trim()) newErrors.name = 'Company name is required';
+    if (!doc) newErrors.doc = 'Date of creation is required';
+    if (!about.trim()) newErrors.about = 'About company is required';
+    if (!departments.trim()) newErrors.departments = 'At least one department is required';
+    if (!lastCheckIn) newErrors.lastCheckIn = 'Last check-in time is required';
+    if (!beginCheckOut) newErrors.beginCheckOut = 'Begin check-out time is required';
+    if (!regNumber.trim()) newErrors.regNumber = 'Registration number is required';
+    
+    if (!pan.trim()) {
+      newErrors.pan = 'PAN number is required';
+    } else if (!validatePAN(pan)) {
+      newErrors.pan = 'Invalid PAN format. Use: ABCDE1234F (5 letters, 4 digits, 1 letter)';
+    }
+    
+    if (!companyType.trim()) newErrors.companyType = 'Company type is required';
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  // Handle PAN input with uppercase and format restriction
+  const handlePANChange = (value: string) => {
+    // Convert to uppercase and limit to 10 characters
+    const upperValue = value.toUpperCase().slice(0, 10);
+    
+    // Only allow letters and numbers in correct positions
+    let formattedValue = '';
+    for (let i = 0; i < upperValue.length; i++) {
+      const char = upperValue[i];
+      if (i < 5) {
+        // First 5 characters must be letters
+        if (/[A-Z]/.test(char)) formattedValue += char;
+      } else if (i < 9) {
+        // Next 4 characters must be digits
+        if (/[0-9]/.test(char)) formattedValue += char;
+      } else {
+        // Last character must be a letter
+        if (/[A-Z]/.test(char)) formattedValue += char;
+      }
+    }
+    
+    setPan(formattedValue);
+  };
+
   // Create company
   const handleSubmit = async () => {
+    // Validate form
+    if (!validateForm()) {
+      showSnackbar('Please fill in all required fields correctly', 'error');
+      return;
+    }
+
     try {
       setLoading(true);
       
@@ -155,14 +320,16 @@ const SupportCompanyDemoPage = () => {
           companyType,
         },
       };
+      
       const res = await axios.post(`${BASE_URL}/create/cmp`, payload);
       console.log('Company created:', res.data);
       await fetchCompanies();
       clearForm();
-      alert('Company created successfully!');
+      showSnackbar('Company created successfully!', 'success');
     } catch (err: any) {
       console.error(err);
-      alert('Error creating company: ' + (err.message || 'Unknown error'));
+      const errorMsg = extractErrorMessage(err);
+      showSnackbar(`Error creating company: ${errorMsg}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -181,6 +348,7 @@ const SupportCompanyDemoPage = () => {
     setRegNumber('');
     setPan('');
     setCompanyType('');
+    setErrors({});
   };
 
   const handleViewDetails = async (companyEmail: string) => {
@@ -191,28 +359,38 @@ const SupportCompanyDemoPage = () => {
       setModalOpen(true);
     } catch (err: any) {
       console.error(err);
-      alert('Error fetching company details: ' + (err.message || 'Unknown error'));
+      const errorMsg = extractErrorMessage(err);
+      showSnackbar(`Error fetching company details: ${errorMsg}`, 'error');
     } finally {
       setLoading(false);
     }
   };
 
   const handleDeleteCompany = async (companyEmail: string) => {
-    if (!window.confirm(`Are you sure you want to delete company: ${companyEmail}?`)) {
-      return;
-    }
-    
+    setCompanyToDelete(companyEmail);
+    setDeleteModalOpen(true);
+  };
+
+  const confirmDelete = async () => {
     try {
       setLoading(true);
-      await axios.delete(`${BASE_URL}/cmp/${encodeURIComponent(companyEmail)}`);
-      alert('Company deleted successfully!');
+      setDeleteModalOpen(false);
+      await axios.delete(`${BASE_URL}/cmp/${encodeURIComponent(companyToDelete)}`);
+      showSnackbar('Company deleted successfully!', 'success');
       await fetchCompanies();
     } catch (err: any) {
       console.error(err);
-      alert('Error deleting company: ' + (err.message || 'Unknown error'));
+      const errorMsg = extractErrorMessage(err);
+      showSnackbar(`Error deleting company: ${errorMsg}`, 'error');
     } finally {
       setLoading(false);
+      setCompanyToDelete('');
     }
+  };
+
+  const cancelDelete = () => {
+    setDeleteModalOpen(false);
+    setCompanyToDelete('');
   };
 
   return (
@@ -254,20 +432,26 @@ const SupportCompanyDemoPage = () => {
                 <TextField 
                   label="Company Email" 
                   fullWidth 
+                  required
                   value={email} 
                   onChange={(e) => setEmail(e.target.value)}
                   variant="outlined"
                   size="small"
+                  error={!!errors.email}
+                  helperText={errors.email}
                 />
               </Grid>
               <Grid size={{ xs: 12, md: 6 }}>
                 <TextField 
                   label="Company Name" 
                   fullWidth 
+                  required
                   value={name} 
                   onChange={(e) => setName(e.target.value)}
                   variant="outlined"
                   size="small"
+                  error={!!errors.name}
+                  helperText={errors.name}
                 />
               </Grid>
               <Grid size={{ xs: 12, md: 6 }}>
@@ -275,21 +459,27 @@ const SupportCompanyDemoPage = () => {
                   label="Date of Creation"
                   type="date"
                   fullWidth
+                  required
                   InputLabelProps={{ shrink: true }}
                   value={doc}
                   onChange={(e) => setDoc(e.target.value)}
                   variant="outlined"
                   size="small"
+                  error={!!errors.doc}
+                  helperText={errors.doc}
                 />
               </Grid>
               <Grid size={{ xs: 12, md: 6 }}>
                 <TextField 
                   label="About Company" 
                   fullWidth 
+                  required
                   value={about} 
                   onChange={(e) => setAbout(e.target.value)}
                   variant="outlined"
                   size="small"
+                  error={!!errors.about}
+                  helperText={errors.about}
                 />
               </Grid>
               
@@ -305,14 +495,16 @@ const SupportCompanyDemoPage = () => {
                 <TextField 
                   label="Departments" 
                   fullWidth 
+                  required
                   value={departments} 
                   onChange={(e) => setDepartments(e.target.value)}
                   placeholder="e.g., HR, IT, Finance, Sales"
-                  helperText="Enter department names separated by commas"
+                  helperText={errors.departments || "Enter department names separated by commas"}
                   variant="outlined"
                   size="small"
                   multiline
                   rows={2}
+                  error={!!errors.departments}
                 />
               </Grid>
               
@@ -332,10 +524,12 @@ const SupportCompanyDemoPage = () => {
                   <TextField
                     type="time"
                     fullWidth
+                    required
                     value={lastCheckIn}
                     onChange={(e) => setLastCheckIn(e.target.value)}
                     variant="outlined"
                     size="small"
+                    error={!!errors.lastCheckIn}
                     inputProps={{
                       step: 60
                     }}
@@ -350,7 +544,9 @@ const SupportCompanyDemoPage = () => {
                     </Select>
                   </FormControl>
                 </Box>
-                <FormHelperText>Last allowed time for check-in</FormHelperText>
+                <FormHelperText error={!!errors.lastCheckIn}>
+                  {errors.lastCheckIn || 'Last allowed time for check-in'}
+                </FormHelperText>
               </Grid>
               <Grid size={{ xs: 12, md: 6 }}>
                 <Typography variant="caption" color="text.secondary" fontWeight={600} sx={{ mb: 0.5, display: 'block' }}>
@@ -360,10 +556,12 @@ const SupportCompanyDemoPage = () => {
                   <TextField
                     type="time"
                     fullWidth
+                    required
                     value={beginCheckOut}
                     onChange={(e) => setBeginCheckOut(e.target.value)}
                     variant="outlined"
                     size="small"
+                    error={!!errors.beginCheckOut}
                     inputProps={{
                       step: 60
                     }}
@@ -378,7 +576,9 @@ const SupportCompanyDemoPage = () => {
                     </Select>
                   </FormControl>
                 </Box>
-                <FormHelperText>Earliest time for check-out</FormHelperText>
+                <FormHelperText error={!!errors.beginCheckOut}>
+                  {errors.beginCheckOut || 'Earliest time for check-out'}
+                </FormHelperText>
               </Grid>
               
               {/* Company Details */}
@@ -393,30 +593,45 @@ const SupportCompanyDemoPage = () => {
                 <TextField 
                   label="Registration Number" 
                   fullWidth 
+                  required
                   value={regNumber} 
                   onChange={(e) => setRegNumber(e.target.value)}
                   variant="outlined"
                   size="small"
+                  error={!!errors.regNumber}
+                  helperText={errors.regNumber}
                 />
               </Grid>
               <Grid size={{ xs: 12, md: 4 }}>
                 <TextField 
                   label="PAN Number" 
                   fullWidth 
+                  required
                   value={pan} 
-                  onChange={(e) => setPan(e.target.value)}
+                  onChange={(e) => handlePANChange(e.target.value)}
                   variant="outlined"
                   size="small"
+                  error={!!errors.pan}
+                  helperText={errors.pan || "Format: ABCDE1234F"}
+                  placeholder="ABCDE1234F"
+                  inputProps={{
+                    maxLength: 10,
+                    style: { textTransform: 'uppercase' }
+                  }}
                 />
               </Grid>
               <Grid size={{ xs: 12, md: 4 }}>
                 <TextField 
                   label="Company Type" 
                   fullWidth 
+                  required
                   value={companyType} 
                   onChange={(e) => setCompanyType(e.target.value)}
                   variant="outlined"
                   size="small"
+                  error={!!errors.companyType}
+                  helperText={errors.companyType}
+                  placeholder="e.g., Pvt Ltd, Public Ltd"
                 />
               </Grid>
               
@@ -455,8 +670,16 @@ const SupportCompanyDemoPage = () => {
           </Box>
           <CardContent sx={{ p: 0 }}>
             {loading && (
-              <Box sx={{ p: 3, textAlign: 'center' }}>
-                <Typography>Loading...</Typography>
+              <Box sx={{ 
+                p: 8, 
+                textAlign: 'center',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 2
+              }}>
+                <CircularProgress size={48} />
+                <Typography color="text.secondary">Loading companies...</Typography>
               </Box>
             )}
             {error && (
@@ -469,15 +692,47 @@ const SupportCompanyDemoPage = () => {
                 <Table>
                   <TableHead>
                     <TableRow sx={{ bgcolor: '#fafafa' }}>
-                      <TableCell sx={{ fontWeight: 600 }}>Email</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>Company Name</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>Date Created</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>Departments</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>
+                        <TableSortLabel
+                          active={sortField === 'email'}
+                          direction={sortField === 'email' ? sortOrder : 'asc'}
+                          onClick={() => handleSort('email')}
+                        >
+                          Email
+                        </TableSortLabel>
+                      </TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>
+                        <TableSortLabel
+                          active={sortField === 'name'}
+                          direction={sortField === 'name' ? sortOrder : 'asc'}
+                          onClick={() => handleSort('name')}
+                        >
+                          Company Name
+                        </TableSortLabel>
+                      </TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>
+                        <TableSortLabel
+                          active={sortField === 'doc'}
+                          direction={sortField === 'doc' ? sortOrder : 'asc'}
+                          onClick={() => handleSort('doc')}
+                        >
+                          Date Created
+                        </TableSortLabel>
+                      </TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>
+                        <TableSortLabel
+                          active={sortField === 'departments'}
+                          direction={sortField === 'departments' ? sortOrder : 'asc'}
+                          onClick={() => handleSort('departments')}
+                        >
+                          Departments
+                        </TableSortLabel>
+                      </TableCell>
                       <TableCell sx={{ fontWeight: 600 }} align="center">Actions</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {companies.map((cmp) => (
+                    {sortedCompanies.map((cmp) => (
                       <TableRow 
                         key={cmp.email}
                         sx={{ '&:hover': { bgcolor: '#f5f5f5' } }}
@@ -655,6 +910,85 @@ const SupportCompanyDemoPage = () => {
             </Button>
           </DialogActions>
         </Dialog>
+
+        {/* Delete Confirmation Modal */}
+        <Dialog 
+          open={deleteModalOpen} 
+          onClose={cancelDelete}
+          maxWidth="xs"
+          fullWidth
+          PaperProps={{
+            sx: { borderRadius: 2 }
+          }}
+        >
+          <DialogTitle sx={{ bgcolor: '#fff3e0', borderBottom: '1px solid #ffb74d', pb: 2 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Delete sx={{ color: '#f57c00', fontSize: 28 }} />
+              <Typography variant="h6" fontWeight={600} color="#e65100">
+                Confirm Delete
+              </Typography>
+            </Box>
+          </DialogTitle>
+          <DialogContent sx={{ mt: 3, mb: 2 }}>
+            <Typography variant="body1" gutterBottom>
+              Are you sure you want to delete this company?
+            </Typography>
+            <Box sx={{ 
+              mt: 2, 
+              p: 2, 
+              bgcolor: '#f5f5f5', 
+              borderRadius: 1,
+              borderLeft: '4px solid #f57c00'
+            }}>
+              <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                COMPANY EMAIL
+              </Typography>
+              <Typography variant="body2" fontWeight={500} sx={{ mt: 0.5 }}>
+                {companyToDelete}
+              </Typography>
+            </Box>
+            <Alert severity="warning" sx={{ mt: 2 }}>
+              This action cannot be undone. All company data will be permanently removed.
+            </Alert>
+          </DialogContent>
+          <DialogActions sx={{ p: 2, bgcolor: '#fafafa', gap: 1 }}>
+            <Button 
+              onClick={cancelDelete} 
+              variant="outlined"
+              color="inherit"
+              sx={{ px: 3 }}
+            >
+              Cancel
+            </Button>
+            <Button 
+              onClick={confirmDelete} 
+              variant="contained"
+              color="error"
+              disabled={loading}
+              startIcon={loading ? <CircularProgress size={16} /> : <Delete />}
+              sx={{ px: 3 }}
+            >
+              {loading ? 'Deleting...' : 'Delete Company'}
+            </Button>
+          </DialogActions>
+        </Dialog>
+
+        {/* Custom Snackbar */}
+        <Snackbar
+          open={snackbar.open}
+          autoHideDuration={6000}
+          onClose={handleCloseSnackbar}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+        >
+          <Alert 
+            onClose={handleCloseSnackbar} 
+            severity={snackbar.severity}
+            variant="filled"
+            sx={{ width: '100%' }}
+          >
+            {snackbar.message}
+          </Alert>
+        </Snackbar>
       </Container>
     </Box>
   );

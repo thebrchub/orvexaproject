@@ -1,4 +1,20 @@
 import { useState, useEffect } from 'react';
+import {
+  People,
+  CheckCircle,
+  Cancel,
+  Schedule,
+  TrendingUp,
+  PersonAdd,
+  AssignmentTurnedIn,
+  AccountBalanceWallet,
+  Refresh,
+  ChevronRight,
+  Assessment,
+  Description,
+  Warning,
+  Work
+} from '@mui/icons-material';
 import { api, parseApiError } from '../lib/api';
 import type { EmployeeResponse, AttendanceRecord, PayrollRecord } from '../lib/api';
 
@@ -29,7 +45,7 @@ interface Activity {
   action: string;
   person: string;
   time: string;
-  icon: string;
+  icon: React.ReactNode;
   color: string;
   bgColor: string;
 }
@@ -52,7 +68,6 @@ export default function Dashboard() {
       
       const today = new Date().toISOString().split('T')[0];
       
-      // Fetch data using the same API calls as other pages
       const [employeesData, attendanceData, payrollData] = await Promise.all([
         api.getAllEmployees(),
         api.getAttendance(today),
@@ -76,7 +91,6 @@ export default function Dashboard() {
     }
   };
 
-  // Calculate stats from real data
   const stats = {
     totalEmployees: employees.length,
     presentToday: attendanceRecords.filter(record => 
@@ -103,38 +117,36 @@ export default function Dashboard() {
     {
       title: 'Total Employees',
       value: stats.totalEmployees.toString(),
-      icon: '👥',
+      icon: <People sx={{ fontSize: 32 }} />,
       textColor: 'text-blue-600',
       iconBg: 'bg-blue-100',
     },
     {
       title: 'Present Today',
       value: stats.presentToday.toString(),
-      icon: '✅',
+      icon: <CheckCircle sx={{ fontSize: 32 }} />,
       textColor: 'text-green-600',
       iconBg: 'bg-green-100',
     },
     {
       title: 'Absent Today',
       value: stats.absentToday.toString(),
-      icon: '❌',
+      icon: <Cancel sx={{ fontSize: 32 }} />,
       textColor: 'text-red-600',
       iconBg: 'bg-red-100',
     },
     {
       title: 'Late Arrivals',
       value: stats.lateToday.toString(),
-      icon: '⏰',
+      icon: <Schedule sx={{ fontSize: 32 }} />,
       textColor: 'text-yellow-600',
       iconBg: 'bg-yellow-100',
     },
   ];
 
-  // Generate activities from real data
   const generateActivities = (): Activity[] => {
     const activities: Activity[] = [];
     
-    // Get recent employees (last 2) - sort by date of joining since createdAt doesn't exist
     const recentEmployees = [...employees]
       .sort((a, b) => {
         const dateA = new Date(a.doj || 0).getTime();
@@ -148,13 +160,12 @@ export default function Dashboard() {
         action: 'New employee added',
         person: emp.name || 'Unknown',
         time: getRelativeTime(emp.doj),
-        icon: '👤',
+        icon: <PersonAdd />,
         color: 'text-blue-600',
         bgColor: 'bg-blue-50'
       });
     });
     
-    // Get recent attendance (last 2)
     const recentAttendance = [...attendanceRecords]
       .filter(record => record.checkIn)
       .slice(0, 2);
@@ -164,13 +175,12 @@ export default function Dashboard() {
         action: 'Attendance marked',
         person: record.employeeName || 'Unknown',
         time: getRelativeTime(record.checkIn || undefined),
-        icon: '✅',
+        icon: <CheckCircle />,
         color: 'text-green-600',
         bgColor: 'bg-green-50'
       });
     });
     
-    // Get recent payroll (last 1)
     const recentPayroll = [...payrollRecords]
       .sort((a, b) => {
         const dateA = new Date(a.generatedAt || 0).getTime();
@@ -184,7 +194,7 @@ export default function Dashboard() {
         action: 'Payroll generated',
         person: record.employeeName || 'Unknown',
         time: getRelativeTime(record.generatedAt),
-        icon: '💰',
+        icon: <AccountBalanceWallet />,
         color: 'text-purple-600',
         bgColor: 'bg-purple-50'
       });
@@ -200,13 +210,14 @@ export default function Dashboard() {
   if (error) {
     return (
       <div className="bg-white rounded-2xl shadow-sm p-12 text-center">
-        <div className="text-red-400 text-6xl mb-4">⚠️</div>
+        <Warning sx={{ fontSize: 64, color: '#f87171', mb: 2 }} />
         <h3 className="text-lg font-medium text-gray-900 mb-2">Error Loading Dashboard</h3>
         <p className="text-gray-500 mb-4">{error}</p>
         <button 
           onClick={loadDashboardData}
-          className="px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors font-semibold"
+          className="px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors font-semibold inline-flex items-center gap-2"
         >
+          <Refresh />
           Try Again
         </button>
       </div>
@@ -227,9 +238,9 @@ export default function Dashboard() {
           </div>
           <button 
             onClick={loadDashboardData}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center text-sm"
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center gap-2 text-sm"
           >
-            <span className="mr-2">🔄</span>
+            <Refresh sx={{ fontSize: 18 }} />
             Refresh
           </button>
         </div>
@@ -268,7 +279,7 @@ export default function Dashboard() {
 interface StatCardProps {
   title: string;
   value: string;
-  icon: string;
+  icon: React.ReactNode;
   iconBg: string;
   textColor: string;
 }
@@ -282,7 +293,7 @@ function StatCard({ title, value, icon, iconBg, textColor }: StatCardProps) {
           <p className={`text-3xl font-bold ${textColor}`}>{value}</p>
         </div>
         <div className={`w-14 h-14 ${iconBg} rounded-xl flex items-center justify-center`}>
-          <span className="text-3xl">{icon}</span>
+          {icon}
         </div>
       </div>
     </div>
@@ -300,8 +311,10 @@ function AttendanceOverview({ attendanceRate, present, absent, late }: Attendanc
   return (
     <div className="bg-white rounded-2xl shadow-sm p-8 border border-gray-100">
       <div className="flex items-center justify-between mb-8">
-        <h2 className="text-xl font-bold text-gray-900 flex items-center">
-          <span className="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center mr-3 text-white text-xl">📊</span>
+        <h2 className="text-xl font-bold text-gray-900 flex items-center gap-3">
+          <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center text-white">
+            <Assessment />
+          </div>
           Today's Attendance
         </h2>
         <span className={`px-4 py-2 rounded-xl text-sm font-bold ${
@@ -350,15 +363,35 @@ function AttendanceOverview({ attendanceRate, present, absent, late }: Attendanc
 
 function QuickActions() {
   const actions = [
-    { label: 'Add Employee', icon: '➕', href: '/employees', color: 'from-blue-500 to-blue-600', hoverColor: 'hover:from-blue-600 hover:to-blue-700' },
-    { label: 'Mark Attendance', icon: '📋', href: '/attendance', color: 'from-green-500 to-green-600', hoverColor: 'hover:from-green-600 hover:to-green-700' },
-    { label: 'Generate Payroll', icon: '💰', href: '/payroll', color: 'from-purple-500 to-purple-600', hoverColor: 'hover:from-purple-600 hover:to-purple-700' },
+    { 
+      label: 'Add Employee', 
+      icon: <PersonAdd />, 
+      href: '/employees', 
+      color: 'from-blue-500 to-blue-600', 
+      hoverColor: 'hover:from-blue-600 hover:to-blue-700' 
+    },
+    { 
+      label: 'Mark Attendance', 
+      icon: <AssignmentTurnedIn />, 
+      href: '/attendance', 
+      color: 'from-green-500 to-green-600', 
+      hoverColor: 'hover:from-green-600 hover:to-green-700' 
+    },
+    { 
+      label: 'Generate Payroll', 
+      icon: <AccountBalanceWallet />, 
+      href: '/payroll', 
+      color: 'from-purple-500 to-purple-600', 
+      hoverColor: 'hover:from-purple-600 hover:to-purple-700' 
+    },
   ];
 
   return (
     <div className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
-      <h2 className="text-lg font-bold text-gray-900 mb-5 flex items-center">
-        <span className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-lg flex items-center justify-center mr-3 text-white">⚡</span>
+      <h2 className="text-lg font-bold text-gray-900 mb-5 flex items-center gap-3">
+        <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-lg flex items-center justify-center text-white">
+          <TrendingUp sx={{ fontSize: 18 }} />
+        </div>
         Quick Actions
       </h2>
       <div className="space-y-3">
@@ -366,9 +399,9 @@ function QuickActions() {
           <a
             key={index}
             href={action.href}
-            className={`block w-full text-center py-4 px-4 rounded-xl text-white font-bold transition-all duration-200 bg-gradient-to-r ${action.color} ${action.hoverColor} shadow-lg hover:shadow-xl transform hover:-translate-y-0.5`}
+            className={`flex items-center justify-center gap-2 w-full py-4 px-4 rounded-xl text-white font-bold transition-all duration-200 bg-gradient-to-r ${action.color} ${action.hoverColor} shadow-lg hover:shadow-xl transform hover:-translate-y-0.5`}
           >
-            <span className="text-xl mr-2">{action.icon}</span>
+            {action.icon}
             {action.label}
           </a>
         ))}
@@ -385,8 +418,10 @@ interface PayrollSummaryProps {
 function PayrollSummary({ totalSalary, pendingPayrolls }: PayrollSummaryProps) {
   return (
     <div className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
-      <h2 className="text-lg font-bold text-gray-900 mb-5 flex items-center">
-        <span className="w-8 h-8 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-lg flex items-center justify-center mr-3 text-white">💼</span>
+      <h2 className="text-lg font-bold text-gray-900 mb-5 flex items-center gap-3">
+        <div className="w-8 h-8 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-lg flex items-center justify-center text-white">
+          <Work sx={{ fontSize: 18 }} />
+        </div>
         Payroll Summary
       </h2>
       <div className="space-y-5">
@@ -399,7 +434,7 @@ function PayrollSummary({ totalSalary, pendingPayrolls }: PayrollSummaryProps) {
             <p className="text-sm font-semibold text-orange-800 mb-1">Pending Payrolls</p>
             <p className="text-2xl font-bold text-orange-700">{pendingPayrolls}</p>
           </div>
-          <span className="text-4xl">⏳</span>
+          <Schedule sx={{ fontSize: 40, color: '#ea580c' }} />
         </div>
       </div>
     </div>
@@ -414,12 +449,15 @@ function RecentActivity({ activities }: RecentActivityProps) {
   return (
     <div className="bg-white rounded-2xl shadow-sm p-8 border border-gray-100">
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-xl font-bold text-gray-900 flex items-center">
-          <span className="w-10 h-10 bg-gradient-to-br from-violet-500 to-violet-600 rounded-xl flex items-center justify-center mr-3 text-white text-xl">📝</span>
+        <h2 className="text-xl font-bold text-gray-900 flex items-center gap-3">
+          <div className="w-10 h-10 bg-gradient-to-br from-violet-500 to-violet-600 rounded-xl flex items-center justify-center text-white">
+            <Description />
+          </div>
           Recent Activity
         </h2>
-        <button className="text-blue-600 hover:text-blue-700 text-sm font-bold hover:underline transition-all">
-          View All →
+        <button className="text-blue-600 hover:text-blue-700 text-sm font-bold hover:underline transition-all flex items-center gap-1">
+          View All
+          <ChevronRight sx={{ fontSize: 18 }} />
         </button>
       </div>
       
@@ -431,8 +469,8 @@ function RecentActivity({ activities }: RecentActivityProps) {
         <div className="space-y-3">
           {activities.map((activity, index) => (
             <div key={index} className="flex items-center space-x-4 p-4 hover:bg-gray-50 rounded-xl transition-all duration-200 border border-transparent hover:border-gray-200">
-              <div className={`w-12 h-12 ${activity.bgColor} rounded-xl flex items-center justify-center flex-shrink-0`}>
-                <span className="text-2xl">{activity.icon}</span>
+              <div className={`w-12 h-12 ${activity.bgColor} rounded-xl flex items-center justify-center flex-shrink-0 ${activity.color}`}>
+                {activity.icon}
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-gray-900">{activity.action}</p>
