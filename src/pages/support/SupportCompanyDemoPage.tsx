@@ -28,6 +28,7 @@ import {
   Alert,
   CircularProgress,
   TableSortLabel,
+  InputLabel,
 } from '@mui/material';
 import { Visibility, Delete, Business, Add } from '@mui/icons-material';
 import axios from 'axios';
@@ -63,13 +64,11 @@ const BASE_URL = 'https://hrms-app-deploy-production.up.railway.app/v1/support';
 
 // ---------------------- Helper functions ----------------------
 
-// Convert 12-hour time + AM/PM to 24-hour format, then to UTC string for backend
 const toUTCTimeString = (time12hr: string, period: string) => {
   if (!time12hr) return '';
   const [hours, minutes] = time12hr.split(':').map(Number);
   let hours24 = hours;
   
-  // Convert to 24-hour format
   if (period === 'PM' && hours !== 12) {
     hours24 = hours + 12;
   } else if (period === 'AM' && hours === 12) {
@@ -81,7 +80,6 @@ const toUTCTimeString = (time12hr: string, period: string) => {
   return date.toISOString().substr(11, 8);
 };
 
-// Convert UTC string → local time in 12-hour format with AM/PM
 const formatLocalTime = (utcTimeStr: string) => {
   if (!utcTimeStr) return '';
   const date = new Date(`1970-01-01T${utcTimeStr}Z`);
@@ -92,7 +90,6 @@ const formatLocalTime = (utcTimeStr: string) => {
   });
 };
 
-// Convert DOC (YYYY-MM-DD) in UTC → local display (DD/MM/YYYY format)
 const formatLocalDate = (utcDateStr: string) => {
   if (!utcDateStr) return '';
   const date = new Date(utcDateStr + 'T00:00:00Z');
@@ -103,11 +100,30 @@ const formatLocalDate = (utcDateStr: string) => {
   });
 };
 
-// PAN card validation: ABCDE1234F format (5 letters, 4 digits, 1 letter)
 const validatePAN = (pan: string): boolean => {
   const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
   return panRegex.test(pan);
 };
+
+// Company Types - All major types in India
+const COMPANY_TYPES = [
+  'Private Limited (Pvt Ltd)',
+  'Public Limited (Ltd)',
+  'Limited Liability Partnership (LLP)',
+  'One Person Company (OPC)',
+  'Partnership Firm',
+  'Sole Proprietorship',
+  'Non-Governmental Organization (NGO)',
+  'Section 8 Company (Non-Profit)',
+  'Trust',
+  'Society',
+  'Hindu Undivided Family (HUF)',
+  'Producer Company',
+  'Nidhi Company',
+  'Foreign Company',
+  'Joint Venture',
+  'Cooperative Society',
+];
 
 // -----------------------------------------------------------------
 
@@ -116,14 +132,12 @@ const SupportCompanyDemoPage = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Snackbar state
   const [snackbar, setSnackbar] = useState<SnackbarState>({
     open: false,
     message: '',
     severity: 'info'
   });
 
-  // Form state
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [doc, setDoc] = useState('');
@@ -137,31 +151,22 @@ const SupportCompanyDemoPage = () => {
   const [pan, setPan] = useState('');
   const [companyType, setCompanyType] = useState('');
 
-  // Validation errors
   const [errors, setErrors] = useState<Record<string, string>>({});
-
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
-
-  // Delete confirmation modal
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [companyToDelete, setCompanyToDelete] = useState<string>('');
-
-  // Sorting state
   const [sortField, setSortField] = useState<SortField>('name');
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
 
-  // Show snackbar helper
   const showSnackbar = (message: string, severity: SnackbarState['severity']) => {
     setSnackbar({ open: true, message, severity });
   };
 
-  // Close snackbar
   const handleCloseSnackbar = () => {
     setSnackbar({ ...snackbar, open: false });
   };
 
-  // Extract error message from API response
   const extractErrorMessage = (err: any): string => {
     if (err.response?.data?.details) {
       return err.response.data.details;
@@ -175,7 +180,6 @@ const SupportCompanyDemoPage = () => {
     return err.message || 'An unknown error occurred';
   };
 
-  // Fetch all companies
   const fetchCompanies = async () => {
     setLoading(true);
     try {
@@ -196,14 +200,12 @@ const SupportCompanyDemoPage = () => {
     fetchCompanies();
   }, []);
 
-  // Handle sorting
   const handleSort = (field: SortField) => {
     const isAsc = sortField === field && sortOrder === 'asc';
     setSortOrder(isAsc ? 'desc' : 'asc');
     setSortField(field);
   };
 
-  // Sort companies
   const sortedCompanies = [...companies].sort((a, b) => {
     let aValue: any;
     let bValue: any;
@@ -239,7 +241,6 @@ const SupportCompanyDemoPage = () => {
     return 0;
   });
 
-  // Validate form
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};
 
@@ -266,23 +267,17 @@ const SupportCompanyDemoPage = () => {
     return Object.keys(newErrors).length === 0;
   };
 
-  // Handle PAN input with uppercase and format restriction
   const handlePANChange = (value: string) => {
-    // Convert to uppercase and limit to 10 characters
     const upperValue = value.toUpperCase().slice(0, 10);
     
-    // Only allow letters and numbers in correct positions
     let formattedValue = '';
     for (let i = 0; i < upperValue.length; i++) {
       const char = upperValue[i];
       if (i < 5) {
-        // First 5 characters must be letters
         if (/[A-Z]/.test(char)) formattedValue += char;
       } else if (i < 9) {
-        // Next 4 characters must be digits
         if (/[0-9]/.test(char)) formattedValue += char;
       } else {
-        // Last character must be a letter
         if (/[A-Z]/.test(char)) formattedValue += char;
       }
     }
@@ -290,9 +285,7 @@ const SupportCompanyDemoPage = () => {
     setPan(formattedValue);
   };
 
-  // Create company
   const handleSubmit = async () => {
-    // Validate form
     if (!validateForm()) {
       showSnackbar('Please fill in all required fields correctly', 'error');
       return;
@@ -396,7 +389,6 @@ const SupportCompanyDemoPage = () => {
   return (
     <Box sx={{ backgroundColor: '#f5f7fa', minHeight: '100vh', py: 4 }}>
       <Container maxWidth="xl">
-        {/* Header */}
         <Box sx={{ mb: 4 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
             <Business sx={{ fontSize: 32, color: '#1976d2' }} />
@@ -409,7 +401,6 @@ const SupportCompanyDemoPage = () => {
           </Typography>
         </Box>
 
-        {/* Create Company Form */}
         <Paper elevation={2} sx={{ mb: 4, borderRadius: 2, overflow: 'hidden' }}>
           <Box sx={{ bgcolor: '#1976d2', px: 3, py: 2 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -421,7 +412,6 @@ const SupportCompanyDemoPage = () => {
           </Box>
           <CardContent sx={{ p: 3 }}>
             <Grid container spacing={3}>
-              {/* Basic Information */}
               <Grid size={{ xs: 12 }}>
                 <Typography variant="subtitle2" color="text.secondary" fontWeight={600} sx={{ mb: 2 }}>
                   Basic Information
@@ -483,7 +473,6 @@ const SupportCompanyDemoPage = () => {
                 />
               </Grid>
               
-              {/* Departments */}
               <Grid size={{ xs: 12 }}>
                 <Divider sx={{ my: 2 }} />
                 <Typography variant="subtitle2" color="text.secondary" fontWeight={600} sx={{ mb: 2 }}>
@@ -508,7 +497,6 @@ const SupportCompanyDemoPage = () => {
                 />
               </Grid>
               
-              {/* Working Hours */}
               <Grid size={{ xs: 12 }}>
                 <Divider sx={{ my: 2 }} />
                 <Typography variant="subtitle2" color="text.secondary" fontWeight={600} sx={{ mb: 2 }}>
@@ -581,7 +569,6 @@ const SupportCompanyDemoPage = () => {
                 </FormHelperText>
               </Grid>
               
-              {/* Company Details */}
               <Grid size={{ xs: 12 }}>
                 <Divider sx={{ my: 2 }} />
                 <Typography variant="subtitle2" color="text.secondary" fontWeight={600} sx={{ mb: 2 }}>
@@ -621,21 +608,29 @@ const SupportCompanyDemoPage = () => {
                 />
               </Grid>
               <Grid size={{ xs: 12, md: 4 }}>
-                <TextField 
-                  label="Company Type" 
+                <FormControl 
                   fullWidth 
                   required
-                  value={companyType} 
-                  onChange={(e) => setCompanyType(e.target.value)}
                   variant="outlined"
                   size="small"
                   error={!!errors.companyType}
-                  helperText={errors.companyType}
-                  placeholder="e.g., Pvt Ltd, Public Ltd"
-                />
+                >
+                  <InputLabel>Company Type</InputLabel>
+                  <Select
+                    value={companyType}
+                    onChange={(e) => setCompanyType(e.target.value)}
+                    label="Company Type"
+                  >
+                    {COMPANY_TYPES.map((type) => (
+                      <MenuItem key={type} value={type}>
+                        {type}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                  <FormHelperText>{errors.companyType}</FormHelperText>
+                </FormControl>
               </Grid>
               
-              {/* Actions */}
               <Grid size={{ xs: 12 }}>
                 <Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
                   <Button 
@@ -650,10 +645,10 @@ const SupportCompanyDemoPage = () => {
                   </Button>
                   <Button 
                     variant="outlined" 
-                    onClick={() => (window.location.href = '/login')}
+                    onClick={clearForm}
                     sx={{ px: 4 }}
                   >
-                    Skip
+                    Clear Form
                   </Button>
                 </Box>
               </Grid>
@@ -661,7 +656,6 @@ const SupportCompanyDemoPage = () => {
           </CardContent>
         </Paper>
 
-        {/* All Companies Table */}
         <Paper elevation={2} sx={{ borderRadius: 2, overflow: 'hidden' }}>
           <Box sx={{ bgcolor: '#f8f9fa', px: 3, py: 2, borderBottom: '1px solid #e0e0e0' }}>
             <Typography variant="h6" fontWeight={500}>
@@ -792,7 +786,6 @@ const SupportCompanyDemoPage = () => {
           </CardContent>
         </Paper>
 
-        {/* Modal for Company Details */}
         <Dialog 
           open={modalOpen} 
           onClose={() => setModalOpen(false)} 
@@ -911,7 +904,6 @@ const SupportCompanyDemoPage = () => {
           </DialogActions>
         </Dialog>
 
-        {/* Delete Confirmation Modal */}
         <Dialog 
           open={deleteModalOpen} 
           onClose={cancelDelete}
@@ -973,7 +965,6 @@ const SupportCompanyDemoPage = () => {
           </DialogActions>
         </Dialog>
 
-        {/* Custom Snackbar */}
         <Snackbar
           open={snackbar.open}
           autoHideDuration={6000}
