@@ -60,7 +60,7 @@ interface SnackbarState {
 type SortField = 'email' | 'name' | 'doc' | 'departments';
 type SortOrder = 'asc' | 'desc';
 
-const BASE_URL = 'https://hrms-app-deploy-production.up.railway.app/v1/support';
+const BASE_URL = 'https://hrms.brchub.me/v1/support';
 
 // ---------------------- Helper functions ----------------------
 

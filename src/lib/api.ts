@@ -1,7 +1,7 @@
 import axios from "axios";
 
 // Base API URL
-const BASE_URL = "https://hrms-app-deploy-production.up.railway.app/v1/cmp";
+const BASE_URL = "https://hrms.brchub.me//v1/cmp";
 
 // ============= UTILITY FUNCTIONS =============
 export const formatCurrency = (amount: number): string =>

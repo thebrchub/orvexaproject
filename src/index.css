@@ -1,13 +1,6 @@
-/* index.css */
 
-/* 🚀 CRITICAL: THESE THREE LINES MUST BE AT THE TOP 🚀 */
 @import "tailwindcss";
 
-/* OPTIONAL: You can put your custom font-family setting here, 
-   but it's better to use the font utility class in your <body> tag in index.html or App.tsx 
-*/
-
-/* Example: Setting the global font with Tailwind's 'Inter' font defined in your config */
 @layer base {
   body {
     @apply font-sans; 
